@@ -1,0 +1,51 @@
+[project]
+name = "cashu"
+version = "0.1.0"
+description = "PS tokens bound to whole Lightning hold invoice claims"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = [
+  "pyblst>=0.3.15,<0.4",
+  "fastapi>=0.115,<0.116",
+  "pydantic>=2.9,<3",
+  "httpx>=0.27,<1",
+  "uvicorn>=0.30,<1",
+  "bolt11>=2.1.1,<3",
+  "python-dotenv>=1,<2",
+]
+
+[project.scripts]
+mint = "cashu.server:main"
+cashu = "cashu.cli:main"
+
+[tool.poetry]
+packages = [{ include = "cashu" }]
+include = ["PROVENANCE.md", "examples", "tests", "Makefile", "poetry.lock", ".env.example"]
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8,<9"
+pytest-asyncio = ">=0.24,<1"
+ruff = ">=0.7"
+mypy = ">=1.11"
+
+[build-system]
+requires = ["poetry-core>=2.1,<3"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+markers = ["regtest: live Lightning node integration"]
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+extend-select = ["I"]
+
+[tool.mypy]
+ignore_missing_imports = true
+check_untyped_defs = true
