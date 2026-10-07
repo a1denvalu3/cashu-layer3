@@ -17,6 +17,7 @@ def isolated_configuration(tmp_path, monkeypatch):
         "CASHU_LND_CERT",
         "CASHU_LND_MACAROON",
         "CASHU_FEE_LIMIT_SAT",
+        "CASHU_LND_HOLD_EXPIRY_DELTA",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -30,6 +31,7 @@ def test_dotenv_selects_lnd_and_its_credentials(tmp_path):
         "CASHU_LND_CERT=data/lnd-mint/tls.cert\n"
         "CASHU_MINT_PORT=4338\n"
         "CASHU_FEE_LIMIT_SAT=20\n"
+        "CASHU_LND_HOLD_EXPIRY_DELTA=30\n"
     )
     args = parse_args([])
     assert args.backend == "lnd"
@@ -39,6 +41,7 @@ def test_dotenv_selects_lnd_and_its_credentials(tmp_path):
     assert args.lnd_cert == Path("data/lnd-mint/tls.cert")
     assert args.port == 4338
     assert args.fee_limit_sat == 20
+    assert args.lnd_hold_expiry_delta == 30
 
 
 def test_cli_overrides_environment_which_overrides_dotenv(tmp_path, monkeypatch):
@@ -61,6 +64,7 @@ def test_cli_overrides_environment_which_overrides_dotenv(tmp_path, monkeypatch)
         "CASHU_MINT_BACKEND=lnd\n",
         "CASHU_MINT_PORT=invalid\n",
         "CASHU_FEE_LIMIT_SAT=-1\n",
+        "CASHU_LND_HOLD_EXPIRY_DELTA=-1\n",
     ],
 )
 def test_invalid_configuration_fails_instead_of_using_fake(tmp_path, configuration):

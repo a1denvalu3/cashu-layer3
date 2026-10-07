@@ -142,6 +142,10 @@ def test_real_server_and_two_cli_wallets(tmp_path, cli_environment):
     assert minting.returncode == 0, errors
     token = json.loads(output)
     assert token["preimage"] == preimage.hex()
+    backing = json.loads(cli("alice", "htlcs"))
+    assert backing["htlcs"][0]["payment_hash"] == payment_hash
+    assert backing["htlcs"][0]["amount"] == 1000
+    assert backing["htlcs"][0]["expires_at"] > backing["checked_at"]
     alice_id = json.loads(cli("alice", "list"))[0]["id"]
     assert cli("alice", "balance").strip() == "Balance: 1000"
     assert "already issued" in cli("alice", "mint", "1000", payment_hash, status=1)
@@ -179,6 +183,7 @@ def test_real_server_and_two_cli_wallets(tmp_path, cli_environment):
     )
     assert all(t["state"] == "SPENT" for t in json.loads(cli("bob", "list")))
     assert json.loads(cli("bob", "pending")) == []
+    assert json.loads(cli("bob", "htlcs"))["htlcs"] == []
     assert os.stat(tmp_path / "bob.sqlite3").st_mode & 0o777 == 0o600
 
 

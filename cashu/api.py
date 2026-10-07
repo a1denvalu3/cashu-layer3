@@ -2,7 +2,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
 from .db import BackendError, MintError
@@ -15,6 +15,7 @@ from .models import (
     Hex32,
     KeysetResponse,
     MintRequest,
+    PendingHTLCsResponse,
     QuoteRequest,
     QuoteResponse,
     SignatureResponse,
@@ -72,11 +73,17 @@ def create_app(mint: Mint, recovery: bool = True) -> FastAPI:
             "swap_request_version": 2,
             "swap_rounds": 1,
             "redemption": "whole-amount-bolt11-with-backing-preimage",
+            "pending_htlcs": "/v1/htlcs/pending",
         }
 
     @app.get("/v1/keys", response_model=KeysetResponse)
     async def keys() -> KeysetResponse:
         return mint.keyset()
+
+    @app.get("/v1/htlcs/pending", response_model=PendingHTLCsResponse)
+    async def pending_htlcs(response: Response) -> PendingHTLCsResponse:
+        response.headers["Cache-Control"] = "no-store"
+        return await mint.pending_htlcs()
 
     @app.post("/v1/mint/quote/bolt11", response_model=QuoteResponse)
     async def quote(request: QuoteRequest) -> QuoteResponse:

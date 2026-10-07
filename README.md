@@ -7,6 +7,10 @@ claim through private swaps while the original Lightning payment stays pending.
 The final holder burns the token to pay a Lightning invoice and settle its
 backing HTLC.
 
+Explore the [animated Layer3 field guide](docs/layer3.html) for the protocol
+flow, exact proof relations, and current limitations. Download the HTML file
+and open it in a browser; it works offline without a server or build step.
+
 ## How Layer3 works
 
 The client chooses a 32-byte preimage `P` and computes its payment hash
@@ -45,6 +49,63 @@ preimage, then settles the original HODL invoice using `P`.
 
 The transferring wallets know the token's amount, backing hash, and secrets.
 The swap's privacy applies to the information sent to the mint.
+
+## Public backing and expiry
+
+The mint publishes a fresh backing snapshot at `GET /v1/htlcs/pending`.
+It lists issued, fully funded, accepted holds that have not expired or been
+reserved for a burn. Open or unissued invoices, canceled or settled holds,
+underfunded claims, and pending burns are excluded. Each entry contains its
+public backing payment hash, whole amount, and deadline. Preimages, owner
+secrets, nullifiers, credentials, and quote IDs are not published.
+
+Inspect the list with the wallet or HTTP:
+
+```bash
+poetry run cashu --mint http://127.0.0.1:3338 htlcs
+curl --fail http://127.0.0.1:3338/v1/htlcs/pending
+```
+
+The response includes `checked_at` (Unix seconds), `block_height`, and `htlcs`.
+An LND entry reports:
+
+| Field | Meaning |
+|---|---|
+| `payment_hash`, `amount` | Original backing hash and full amount in sats |
+| `htlc_expiry_height` | Earliest CLTV expiry of the currently accepted HTLCs, including multipart payments |
+| `expiry_height` | LND's earlier hold-cancellation height: `htlc_expiry_height - hold_expiry_delta` |
+| `blocks_remaining` | Blocks until that cancellation height, from the snapshot's `block_height` |
+| `invoice_expires_at` | Original invoice funding deadline in Unix seconds; this is **not** the accepted HTLC's expiry |
+| `expires_at` | `null` for LND: block-based expiry has no exact wall-clock timestamp |
+
+The mint setting `CASHU_LND_HOLD_EXPIRY_DELTA` (or
+`mint --lnd-hold-expiry-delta`) must match the backing node's
+`invoices.holdexpirydelta`. It defaults to 18 blocks, as in the LND 0.21.3
+[sample configuration](https://github.com/lightningnetwork/lnd/blob/v0.21.3-beta/sample-lnd.conf).
+The mint accounts for LND's early cancellation behavior; it does not use the
+invoice's payment-request expiry as the held payment's deadline. The fake
+backend instead expires holds by wall clock and returns `expires_at`, with
+the block fields set to `null`.
+
+Before `cashu receive` prepares a swap, it verifies the credential and
+downloads the **entire public list**. It matches the incoming token's backing
+hash and signed amount locally and refuses missing, expired, or inconsistent
+backing. It prints the matching deadline to stderr. No hash-specific query
+reveals which claim the receiver is checking; the swap request still hides
+the hash, amount, `h`, and preimage. Python clients can use
+`client.pending_htlcs()` and `client.check_backing(token)` directly.
+
+The endpoint uses `Cache-Control: no-store`. An unavailable or unsynced node,
+missing accepted-HTLC deadline, or incomplete backend read returns HTTP 503
+instead of a partial or cached list. Saved swap retries recover their exact
+receipt without repeating this preflight check.
+
+This is an authoritative **mint-reported snapshot**, not independent proof
+against a dishonest mint or a guarantee against cancellation after the check.
+Publishing it exposes outstanding backing hashes, amounts, and deadlines to
+everyone. Wallets should refresh it before accepting a claim; traffic timing
+can still correlate activity. Local `LIVE` wallet state and `balance` do not
+constitute a fresh backing check.
 
 ## Install and run the demo
 
@@ -246,6 +307,7 @@ following examples, prepend `poetry run` when running from this checkout:
 | `cashu pay <invoice>` | Burn one token with the invoice's full amount |
 | `cashu balance` | Show the available `LIVE` balance |
 | `cashu list` | Show token IDs, amounts, backing hashes, and local states |
+| `cashu htlcs` | Fetch the mint's public pending backing list and expiry deadlines |
 | `cashu decode <token>` | Decode the bearer token JSON without spending it |
 | `cashu pending` | List saved operations for recovery |
 | `cashu pending --sent` | List locally sent tokens |
@@ -438,6 +500,7 @@ FastAPI serves request and response schemas at `/docs`.
 |---|---|
 | `GET /v1/info` | Protocol capabilities |
 | `GET /v1/keys` | Common PS public parameters |
+| `GET /v1/htlcs/pending` | Public live backing hashes, whole amounts, and expiry deadlines |
 | `POST /v1/mint/quote/bolt11` | Create a supplied-hash HODL invoice |
 | `GET /v1/mint/quote/bolt11/{quote}` | Funding and issuance status |
 | `POST /v1/mint/bolt11` | Sign the owner commitment after full HTLC acceptance |
@@ -474,14 +537,20 @@ missing their preimage can attach it through `send --preimage` or
 `pay --preimage`. Saved requests from the earlier two-round swap and same-hash
 burn flows remain recoverable through `cashu retry`.
 
+New receive operations require the mint's public pending-HTLC endpoint.
+Update the mint and wallet together; an older mint without that endpoint
+causes the backing check to fail rather than accepting an unchecked claim.
+
 Earlier payment-hash-only tokens and populated databases belong to a different
 protocol; they require a new database for this whole-claim scheme.
 
 Tokens are conditional claims on held payments. Cancellation or HTLC timeout
 can remove their backing even if a credential's signature still verifies.
 The private swap does not reveal the backing hash, so the mint does not query
-that individual hold during a swap. The mint remains trusted for custody and
-settlement. This prototype and its cryptography are experimental.
+that individual hold during a swap. The receiver checks the public full list
+before preparing the swap, but the backing can change after that snapshot.
+The mint remains trusted for custody and settlement. This prototype and its
+cryptography are experimental.
 
 Splitting, combining, change, cross-mint redemption, and interoperability with
 ordinary Cashu token formats are outside this protocol.
@@ -503,6 +572,8 @@ make regtest
 It verifies one 12,345-sat token, two private swaps while the original payer
 remains pending, payment of an unrelated receiver invoice, settlement of the
 backing hold, and idempotent retries.
+It also verifies the public backing deadline while held and removal from
+the pending list after settlement.
 
 The defaults use containers `cashu-lnd-1-1` as payer, `cashu-lnd-3-1` as mint,
 and `cashu-lnd-2-1` as receiver, with the mint's REST API at
@@ -512,7 +583,9 @@ liquidity, or an unavailable or mismatched REST endpoint cause an error.
 
 The runner does not start or stop nodes, mine blocks, fund wallets, or open
 channels. Override node names and the REST endpoint with `--payer-container`,
-`--mint-container`, `--receiver-container`, and `--lnd-endpoint`:
+`--mint-container`, `--receiver-container`, and `--lnd-endpoint`.
+Use `--lnd-hold-expiry-delta` if the node's hold-expiry setting differs from
+the default:
 
 ```bash
 poetry run python tests/regtest/run.py --help

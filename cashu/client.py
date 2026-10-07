@@ -2,6 +2,7 @@
 
 import hashlib
 import os
+import time
 from typing import Literal
 
 import httpx
@@ -28,6 +29,8 @@ from .models import (
     Hex32,
     KeysetResponse,
     MintRequest,
+    PendingHTLC,
+    PendingHTLCsResponse,
     QuoteRequest,
     QuoteResponse,
     SignatureResponse,
@@ -67,6 +70,7 @@ class SwapOperation(WireModel):
     blinding: Hex32
     u: G1Hex | None = None  # Retained for saved two-round swap operations.
     request: SwapRequest
+    backing: PendingHTLC | None = None  # Local snapshot, never part of the swap RPC.
 
 
 class BurnOperation(WireModel):
@@ -132,6 +136,44 @@ class Client:
         return QuoteResponse.model_validate_json(
             self._get(f"/v1/mint/quote/bolt11/{quote_id}")
         )
+
+    def pending_htlcs(self) -> PendingHTLCsResponse:
+        return PendingHTLCsResponse.model_validate_json(self._get("/v1/htlcs/pending"))
+
+    def check_backing(
+        self, token: Token, snapshot: PendingHTLCsResponse | None = None
+    ) -> PendingHTLC:
+        """Verify the credential and find its backing in the public full list."""
+        self.credential(token)
+        return self._check_backing(token, snapshot or self.pending_htlcs())
+
+    @staticmethod
+    def _check_backing(token: Token, snapshot: PendingHTLCsResponse) -> PendingHTLC:
+        matches = [
+            entry
+            for entry in snapshot.htlcs
+            if entry.payment_hash == token.payment_hash
+        ]
+        if len(matches) != 1:
+            raise ClientError("token has no unique pending backing HTLC at the mint")
+        backing = matches[0]
+        if backing.amount != token.amount:
+            raise ClientError("pending backing HTLC amount does not match the token")
+        if snapshot.block_height is not None:
+            if (
+                backing.expiry_height is None
+                or backing.htlc_expiry_height is None
+                or backing.expiry_height > backing.htlc_expiry_height
+                or backing.expiry_height <= snapshot.block_height
+                or backing.blocks_remaining
+                != backing.expiry_height - snapshot.block_height
+            ):
+                raise ClientError("pending backing HTLC has expired or has no deadline")
+        elif backing.expires_at is None or backing.expires_at <= max(
+            snapshot.checked_at, int(time.time())
+        ):
+            raise ClientError("pending backing HTLC has expired or has no deadline")
+        return backing
 
     def prepare_mint(self, quote_id: str, preimage: str | None = None) -> MintOperation:
         quote = self.get_quote(quote_id)
@@ -204,6 +246,7 @@ class Client:
 
     def prepare_swap(self, token: Token) -> SwapOperation:
         cred = self.credential(token)
+        backing = self._check_backing(token, self.pending_htlcs())
         public = self.keyset()
         s = fresh_secret()
         C, owner_proof = prove_owner_secret(s)
@@ -225,6 +268,7 @@ class Client:
                 equality_proof=proof.to_bytes().hex(),
                 version=2,
             ),
+            backing=backing,
         )
 
     def finish_swap(self, operation: SwapOperation) -> Token:

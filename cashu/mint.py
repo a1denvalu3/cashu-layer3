@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import os
 import sqlite3
+import time
 from pathlib import Path
 
 from .crypto.bls import PublicKey
@@ -29,6 +30,8 @@ from .models import (
     InvoiceState,
     KeysetResponse,
     MintRequest,
+    PendingHTLC,
+    PendingHTLCsResponse,
     QuoteRequest,
     QuoteResponse,
     SignatureResponse,
@@ -130,6 +133,73 @@ class Mint:
         """One parameter set for whole HTLC claims of any supported amount."""
         public = self.signing_key.public_key
         return KeysetResponse(id=public.keyset_id, public_key=public.to_bytes().hex())
+
+    async def pending_htlcs(self) -> PendingHTLCsResponse:
+        """Fetch live backing for issued claims, without a hash-specific lookup."""
+        with self.db.read() as conn:
+            quotes = conn.execute(
+                "SELECT payment_hash,amount FROM quotes WHERE issued=1 "
+                "AND NOT EXISTS (SELECT 1 FROM burns "
+                "WHERE burns.payment_hash=quotes.payment_hash) "
+                "ORDER BY payment_hash"
+            ).fetchall()
+        semaphore = asyncio.Semaphore(8)
+
+        async def lookup(row: sqlite3.Row) -> Invoice:
+            async with semaphore:
+                invoice = await self.backend.get_invoice(row["payment_hash"])
+                try:
+                    self._validate_invoice(invoice, row["payment_hash"], row["amount"])
+                except ValueError as exc:
+                    raise BackendError(
+                        "backend returned invalid backing metadata"
+                    ) from exc
+                return invoice
+
+        # Backend failures fail the entire request: a partial list would falsely
+        # tell holders that their backing was missing. No cache is used.
+        invoices = await asyncio.gather(*(lookup(row) for row in quotes))
+        block_height = await self.backend.get_block_height()
+        checked_at = int(time.time())
+        with self.db.read() as conn:
+            reserved = {
+                row["payment_hash"]
+                for row in conn.execute("SELECT payment_hash FROM burns")
+            }
+        pending = []
+        for invoice in invoices:
+            if (
+                invoice.payment_hash in reserved
+                or invoice.state != InvoiceState.accepted
+                or invoice.amount_paid < invoice.amount
+            ):
+                continue
+            if block_height is not None:
+                if invoice.expiry_height is None or invoice.htlc_expiry_height is None:
+                    raise BackendError("accepted backing HTLC expiry is unavailable")
+                if invoice.expiry_height <= block_height:
+                    continue
+                blocks_remaining = invoice.expiry_height - block_height
+            else:
+                if invoice.hold_expires_at is None:
+                    raise BackendError("accepted backing HTLC expiry is unavailable")
+                if invoice.hold_expires_at <= checked_at:
+                    continue
+                blocks_remaining = None
+            pending.append(
+                PendingHTLC(
+                    payment_hash=invoice.payment_hash,
+                    amount=invoice.amount,
+                    invoice_expires_at=invoice.expiry,
+                    htlc_expiry_height=invoice.htlc_expiry_height,
+                    expiry_height=invoice.expiry_height,
+                    blocks_remaining=blocks_remaining,
+                    expires_at=invoice.hold_expires_at,
+                )
+            )
+        return PendingHTLCsResponse(
+            checked_at=checked_at, block_height=block_height, htlcs=pending
+        )
 
     def _validate_invoice(
         self, invoice: Invoice, payment_hash: str, amount: int

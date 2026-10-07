@@ -5,6 +5,7 @@ import os
 import shlex
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -113,6 +114,7 @@ def main() -> None:
         "--preimage", help="save the original HTLC preimage locally with the token"
     )
     sub.add_parser("list")
+    sub.add_parser("htlcs", help="show the mint's public pending HTLCs and deadlines")
     balance = sub.add_parser("balance", help="show the available balance")
     balance.add_argument("--verbose", "-v", action="store_true")
     send = sub.add_parser("send", help="send one whole HTLC claim as a token string")
@@ -212,6 +214,8 @@ def main() -> None:
             )
         elif args.command == "list":
             print(json.dumps(wallet.tokens(), indent=2))
+        elif args.command == "htlcs":
+            print(client.pending_htlcs().model_dump_json(indent=2))
         elif args.command == "balance":
             tokens = wallet.tokens()
             if args.verbose:
@@ -260,6 +264,20 @@ def main() -> None:
         elif args.command == "receive":
             assert incoming is not None
             swap_operation = client.prepare_swap(incoming)
+            backing = swap_operation.backing
+            assert backing is not None
+            if backing.expiry_height is not None:
+                deadline = (
+                    f"block {backing.expiry_height} "
+                    f"({backing.blocks_remaining} blocks remaining; "
+                    f"HTLC CLTV {backing.htlc_expiry_height})"
+                )
+            else:
+                assert backing.expires_at is not None
+                deadline = datetime.fromtimestamp(
+                    backing.expires_at, timezone.utc
+                ).isoformat()
+            print(f"Backing HTLC is pending; expires at {deadline}", file=sys.stderr)
             wallet.save(swap_operation)
             print(f"Saved swap operation {swap_operation.id}", file=sys.stderr)
             received = wallet.retry(client, swap_operation.id, "swap")

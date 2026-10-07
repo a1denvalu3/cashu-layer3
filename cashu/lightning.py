@@ -12,7 +12,7 @@ from pathlib import Path
 
 import httpx
 from bolt11 import Bolt11, MilliSatoshi, Tag, TagChar, Tags, decode, encode
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from .db import BackendError, Database
 from .models import InvoiceState
@@ -26,6 +26,9 @@ class Invoice:
     expiry: int
     state: InvoiceState
     amount_paid: int = 0
+    htlc_expiry_height: int | None = None
+    expiry_height: int | None = None
+    hold_expires_at: int | None = None
 
 
 class PaymentState(str, Enum):
@@ -70,6 +73,9 @@ class HoldInvoiceBackend(ABC):
 
     @abstractmethod
     async def get_payment(self, payment_hash: str) -> Payment | None: ...
+
+    async def get_block_height(self) -> int | None:
+        raise BackendError("backend cannot report a live backing snapshot")
 
     async def close(self) -> None:
         pass
@@ -171,7 +177,12 @@ class FakeBackend(HoldInvoiceBackend):
             expiry=row["expiry"],
             state=InvoiceState(row["state"]),
             amount_paid=row["amount_paid"],
+            hold_expires_at=row["expiry"],
         )
+
+    async def get_block_height(self) -> int | None:
+        # The fake backend expires holds by wall clock, without a blockchain.
+        return None
 
     async def accept(self, payment_hash: str) -> None:
         """Simulate a payer whose HTLCs are held, without disclosing a preimage."""
@@ -249,6 +260,19 @@ class FakeBackend(HoldInvoiceBackend):
         return Payment(PaymentState(row["state"]), row["preimage"])
 
 
+class LndHTLC(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    state: str
+    amt_msat: int = Field(ge=0)
+    expiry_height: int = Field(ge=0)
+
+
+class LndInfo(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    block_height: int = Field(ge=0)
+    synced_to_chain: bool
+
+
 class LndInvoice(BaseModel):
     model_config = ConfigDict(extra="ignore")
     r_hash: str
@@ -258,6 +282,7 @@ class LndInvoice(BaseModel):
     expiry: str
     state: InvoiceState
     amt_paid_sat: str = "0"
+    htlcs: list[LndHTLC] = []
 
 
 class LndHoldResponse(BaseModel):
@@ -302,13 +327,17 @@ class LndRestBackend(HoldInvoiceBackend):
         cert_path: Path | None = None,
         fee_limit_sat: int = 10,
         transport: httpx.AsyncBaseTransport | None = None,
+        hold_expiry_delta: int = 18,
     ):
         if not endpoint.startswith("https://"):
             raise ValueError("LND REST endpoint must use https")
         if fee_limit_sat < 0:
             raise ValueError("fee limit must not be negative")
+        if hold_expiry_delta < 0:
+            raise ValueError("hold expiry delta must not be negative")
         tls = ssl.create_default_context(cafile=str(cert_path) if cert_path else None)
         self.fee_limit_sat = fee_limit_sat
+        self.hold_expiry_delta = hold_expiry_delta
         self.client = httpx.AsyncClient(
             base_url=endpoint.rstrip("/"),
             headers={"Grpc-Metadata-macaroon": macaroon_path.read_bytes().hex()},
@@ -361,17 +390,43 @@ class LndRestBackend(HoldInvoiceBackend):
 
     async def get_invoice(self, payment_hash: str) -> Invoice:
         body = await self._call("GET", f"/v1/invoice/{payment_hash}")
-        invoice = LndInvoice.model_validate(body)
-        if base64.b64decode(invoice.r_hash, validate=True).hex() != payment_hash:
-            raise BackendError("LND invoice hash mismatch")
-        return Invoice(
-            payment_hash=payment_hash,
-            amount=int(invoice.value),
-            request=invoice.payment_request,
-            expiry=int(invoice.creation_date) + int(invoice.expiry),
-            state=invoice.state,
-            amount_paid=int(invoice.amt_paid_sat),
-        )
+        try:
+            invoice = LndInvoice.model_validate(body)
+            if base64.b64decode(invoice.r_hash, validate=True).hex() != payment_hash:
+                raise BackendError("LND invoice hash mismatch")
+            active = [htlc for htlc in invoice.htlcs if htlc.state == "ACCEPTED"]
+            expiry_height = None
+            if active and sum(h.amt_msat for h in active) >= int(invoice.value) * 1000:
+                if any(h.expiry_height <= 0 for h in active):
+                    raise BackendError("LND accepted HTLC has no expiry height")
+                # Matches LND's invoice expiry watcher, including multipart holds.
+                expiry_height = min(h.expiry_height for h in active)
+            return Invoice(
+                payment_hash=payment_hash,
+                amount=int(invoice.value),
+                request=invoice.payment_request,
+                expiry=int(invoice.creation_date) + int(invoice.expiry),
+                state=invoice.state,
+                amount_paid=int(invoice.amt_paid_sat),
+                htlc_expiry_height=expiry_height,
+                expiry_height=(
+                    max(0, expiry_height - self.hold_expiry_delta)
+                    if expiry_height is not None
+                    else None
+                ),
+            )
+        except ValueError as exc:
+            raise BackendError("LND returned invalid invoice metadata") from exc
+
+    async def get_block_height(self) -> int | None:
+        body = await self._call("GET", "/v1/getinfo")
+        try:
+            info = LndInfo.model_validate(body)
+        except ValueError as exc:
+            raise BackendError("LND returned invalid chain metadata") from exc
+        if not info.synced_to_chain:
+            raise BackendError("LND is not synced; backing snapshot is unavailable")
+        return info.block_height
 
     async def settle_invoice(self, preimage: bytes) -> None:
         if len(preimage) != 32:

@@ -61,6 +61,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=configuration.get("CASHU_FEE_LIMIT_SAT") or "10",
     )
+    parser.add_argument(
+        "--lnd-hold-expiry-delta",
+        type=int,
+        default=configuration.get("CASHU_LND_HOLD_EXPIRY_DELTA") or "18",
+        help="must match LND's invoices.holdexpirydelta (default: 18 blocks)",
+    )
     args = parser.parse_args(argv)
     if args.backend not in {"fake", "lnd"}:
         parser.error("CASHU_MINT_BACKEND must be fake or lnd")
@@ -68,6 +74,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("mint port must be between 0 and 65535")
     if args.fee_limit_sat < 0:
         parser.error("fee limit must not be negative")
+    if args.lnd_hold_expiry_delta < 0:
+        parser.error("LND hold expiry delta must not be negative")
     if args.backend == "lnd" and (not args.lnd_endpoint or not args.lnd_macaroon):
         parser.error(
             "LND needs --lnd-endpoint and --lnd-macaroon, or their .env settings"
@@ -80,7 +88,11 @@ def main() -> None:
     backend: HoldInvoiceBackend
     if args.backend == "lnd":
         backend = LndRestBackend(
-            args.lnd_endpoint, args.lnd_macaroon, args.lnd_cert, args.fee_limit_sat
+            args.lnd_endpoint,
+            args.lnd_macaroon,
+            args.lnd_cert,
+            args.fee_limit_sat,
+            hold_expiry_delta=args.lnd_hold_expiry_delta,
         )
     else:
         backend = FakeBackend(args.data / "fake.sqlite3")

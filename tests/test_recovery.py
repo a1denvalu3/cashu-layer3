@@ -116,7 +116,7 @@ def test_outbox_resumes_after_payout_without_paying_twice(tmp_path, backend_type
     with pytest.raises(ClientError, match="503"):
         client.finish_burn(op)
     assert client.check([client.nullifier(token)]).states == ["PENDING"]
-    with pytest.raises(ClientError, match="already spent"):
+    with pytest.raises(ClientError, match="pending backing HTLC"):
         client.finish_swap(client.prepare_swap(token))
     backend, mint, client = reopen(service)
     asyncio.run(mint.resume_pending_burns())

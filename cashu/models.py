@@ -46,6 +46,24 @@ class QuoteResponse(WireModel):
     keyset_id: KeysetId
 
 
+class PendingHTLC(WireModel):
+    """Public backing metadata; expiry_height includes LND's early cancellation."""
+
+    payment_hash: Hex32
+    amount: Amount
+    invoice_expires_at: Annotated[int, Field(ge=0)]
+    htlc_expiry_height: Annotated[int, Field(gt=0)] | None = None
+    expiry_height: Annotated[int, Field(ge=0)] | None = None
+    blocks_remaining: Annotated[int, Field(ge=0)] | None = None
+    expires_at: Annotated[int, Field(ge=0)] | None = None
+
+
+class PendingHTLCsResponse(WireModel):
+    checked_at: Annotated[int, Field(ge=0)]
+    block_height: Annotated[int, Field(ge=0)] | None
+    htlcs: list[PendingHTLC]
+
+
 class KeysetResponse(WireModel):
     id: KeysetId
     unit: Literal["sat"] = "sat"

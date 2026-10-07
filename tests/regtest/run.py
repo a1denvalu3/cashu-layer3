@@ -156,7 +156,12 @@ def wait_for(predicate, label: str, timeout: int = 90) -> None:
 
 
 def exercise(
-    payer_node: Node, mint_node: Node, receiver_node: Node, endpoint: str, identity: str
+    payer_node: Node,
+    mint_node: Node,
+    receiver_node: Node,
+    endpoint: str,
+    identity: str,
+    hold_expiry_delta: int = 18,
 ) -> None:
     with tempfile.TemporaryDirectory(prefix="cashu-lnd-") as directory:
         path = Path(directory)
@@ -166,7 +171,12 @@ def exercise(
             path / "admin.macaroon",
         )
         verify_rest(endpoint, path / "admin.macaroon", path / "tls.cert", identity)
-        backend = LndRestBackend(endpoint, path / "admin.macaroon", path / "tls.cert")
+        backend = LndRestBackend(
+            endpoint,
+            path / "admin.macaroon",
+            path / "tls.cert",
+            hold_expiry_delta=hold_expiry_delta,
+        )
         mint = Mint(path / "mint.sqlite3", os.urandom(32), backend)
         preimage = os.urandom(32)
         payment_hash = hashlib.sha256(preimage).hexdigest()
@@ -199,6 +209,13 @@ def exercise(
                 claim = htlc_claim_scalar(payment_hash, amount)
                 keyset_id = client.credential(token).keyset_id
                 assert client.credential(token).h == claim
+                backing = client.check_backing(token)
+                assert backing.htlc_expiry_height is not None
+                assert (
+                    backing.expiry_height
+                    == backing.htlc_expiry_height - hold_expiry_delta
+                )
+                assert backing.blocks_remaining > 0
                 for _ in range(2):
                     token = client.finish_swap(client.prepare_swap(token))
                     assert token.amount == amount
@@ -208,6 +225,7 @@ def exercise(
                     assert client.credential(token).keyset_id == keyset_id
                     assert client.get_quote(quote.quote).state == InvoiceState.accepted
                     assert payer.poll() is None
+                    assert client.check_backing(token).payment_hash == payment_hash
                 print(
                     f"Minted one {amount}-sat HTLC claim and privately swapped twice while the Lightning payer remains pending",
                     flush=True,
@@ -220,6 +238,7 @@ def exercise(
                 assert receipt.preimage == preimage.hex()
                 assert receipt.payout_hash == payout_hash
                 assert client.get_quote(quote.quote).state == InvoiceState.settled
+                assert client.pending_htlcs().htlcs == []
                 assert client.check([client.nullifier(token)]).states == ["SPENT"]
                 assert client.finish_burn(operation) == receipt
                 stdout, stderr = payer.communicate(timeout=30)
@@ -251,16 +270,26 @@ def main() -> None:
     parser.add_argument("--mint-container", default="cashu-lnd-3-1")
     parser.add_argument("--receiver-container", default="cashu-lnd-2-1")
     parser.add_argument("--lnd-endpoint", default="https://localhost:8081")
+    parser.add_argument("--lnd-hold-expiry-delta", type=int, default=18)
     args = parser.parse_args()
     if not args.lnd_endpoint.startswith("https://"):
         parser.error("LND REST endpoint must use https")
+    if args.lnd_hold_expiry_delta < 0:
+        parser.error("LND hold expiry delta must not be negative")
     try:
         payer = Node.connect(args.payer_container)
         mint = Node.connect(args.mint_container)
         receiver = Node.connect(args.receiver_container)
         identity = verify_network(payer, mint, receiver)
         print("Existing cashu-regtest LND nodes are ready", flush=True)
-        exercise(payer, mint, receiver, args.lnd_endpoint, identity)
+        exercise(
+            payer,
+            mint,
+            receiver,
+            args.lnd_endpoint,
+            identity,
+            args.lnd_hold_expiry_delta,
+        )
     except (
         RegtestError,
         ClientError,
