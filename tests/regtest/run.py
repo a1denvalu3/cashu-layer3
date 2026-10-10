@@ -1,4 +1,4 @@
-"""Test whole HTLC claims against an already running cashu-regtest network."""
+"""Test denominated HTLC claims against an already running cashu-regtest network."""
 
 import argparse
 import hashlib
@@ -185,7 +185,7 @@ def exercise(
             client = Client("http://testserver", http)
             quote = client.quote(amount, payment_hash)
             assert quote.state == InvoiceState.open
-            # This payer process remains blocked until the final burn settles it.
+            # This payer process remains blocked until the final melt settles it.
             payer = subprocess.Popen(
                 payer_node.command("payinvoice", "--force", quote.request),
                 stdout=subprocess.PIPE,
@@ -207,9 +207,9 @@ def exercise(
                     client.prepare_mint(quote.quote, preimage.hex())
                 )
                 claim = htlc_claim_scalar(payment_hash, amount)
-                keyset_id = client.credential(token).keyset_id
-                assert client.credential(token).h == claim
-                backing = client.check_backing(token)
+                keyset_id = client.credentials(token)[0].keyset_id
+                assert client.credentials(token)[0].h == claim
+                backing = client.check_backing(token)[0]
                 assert backing.htlc_expiry_height is not None
                 assert (
                     backing.expiry_height
@@ -220,27 +220,31 @@ def exercise(
                     token = client.finish_swap(client.prepare_swap(token))
                     assert token.amount == amount
                     assert token.payment_hash == payment_hash
-                    assert token.preimage == preimage.hex()
-                    assert client.credential(token).h == claim
-                    assert client.credential(token).keyset_id == keyset_id
+                    assert all(p.preimage == preimage.hex() for p in token.proofs)
+                    assert client.credentials(token)[0].h == claim
+                    assert client.credentials(token)[0].keyset_id == keyset_id
                     assert client.get_quote(quote.quote).state == InvoiceState.accepted
                     assert payer.poll() is None
-                    assert client.check_backing(token).payment_hash == payment_hash
+                    assert client.check_backing(token)[0].payment_hash == payment_hash
                 print(
-                    f"Minted one {amount}-sat HTLC claim and privately swapped twice while the Lightning payer remains pending",
+                    f"Minted {amount} sats in binary denominations and privately swapped twice while the Lightning payer remains pending",
                     flush=True,
                 )
                 receiver = receiver_node.ln("addinvoice", "--amt", str(amount))
                 payout_hash, _ = invoice_details(receiver["payment_request"])
                 assert payout_hash != payment_hash
-                operation = client.prepare_burn(token, receiver["payment_request"])
-                receipt = client.finish_burn(operation)
-                assert receipt.preimage == preimage.hex()
+                operation = client.prepare_melt(
+                    token, receiver["payment_request"], fee_reserve=0
+                )
+                receipt = client.finish_melt(operation)
+                assert receipt.fee == 0 and receipt.change == []
                 assert receipt.payout_hash == payout_hash
                 assert client.get_quote(quote.quote).state == InvoiceState.settled
                 assert client.pending_htlcs().htlcs == []
-                assert client.check([client.nullifier(token)]).states == ["SPENT"]
-                assert client.finish_burn(operation) == receipt
+                assert client.check(
+                    [client.nullifier(p) for p in token.proofs]
+                ).states == ["SPENT"] * len(token.proofs)
+                assert client.finish_melt(operation) == receipt
                 stdout, stderr = payer.communicate(timeout=30)
                 assert payer.returncode == 0, stderr
                 # lncli emits status updates followed by a JSON payment result.

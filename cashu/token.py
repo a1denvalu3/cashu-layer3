@@ -7,7 +7,7 @@ import re
 from .models import Token
 
 TOKEN_PREFIX = "cashuPS"
-MAX_TOKEN_LENGTH = 16384
+MAX_TOKEN_LENGTH = 262144
 
 
 def encode_token(token: Token) -> str:

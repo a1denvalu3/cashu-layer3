@@ -90,6 +90,7 @@ async def test_lnd_payment_lookup_paginates_and_validates_preimage(tmp_path):
                         "payment_hash": payment_hash,
                         "status": "SUCCEEDED",
                         "payment_preimage": "00" * 32 if wrong else PREIMAGE.hex(),
+                        "fee_msat": "1501",
                     }
                 ],
                 "last_index_offset": "1001",
@@ -104,6 +105,7 @@ async def test_lnd_payment_lookup_paginates_and_validates_preimage(tmp_path):
     payment = await backend.get_payment(payment_hash)
     assert payment.state == PaymentState.succeeded
     assert payment.preimage == PREIMAGE
+    assert payment.fee_msat == 1501
     assert offsets == ["0", "1000"]
     wrong = True
     with pytest.raises(BackendError, match="invalid preimage"):

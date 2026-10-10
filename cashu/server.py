@@ -34,7 +34,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="PS ecash mint over Lightning hold invoices"
     )
     parser.add_argument(
-        "--data", type=Path, default=configuration.get("CASHU_MINT_DATA") or "data/mint"
+        "--data",
+        type=Path,
+        default=configuration.get("CASHU_MINT_DATA") or "data/mint-v3",
     )
     parser.add_argument(
         "--backend",
@@ -62,6 +64,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=configuration.get("CASHU_FEE_LIMIT_SAT") or "10",
     )
     parser.add_argument(
+        "--settle-margin-blocks",
+        type=int,
+        default=configuration.get("CASHU_SETTLE_MARGIN_BLOCKS") or "6",
+    )
+    parser.add_argument(
+        "--settle-margin-seconds",
+        type=int,
+        default=configuration.get("CASHU_SETTLE_MARGIN_SECONDS") or "120",
+    )
+    parser.add_argument(
         "--lnd-hold-expiry-delta",
         type=int,
         default=configuration.get("CASHU_LND_HOLD_EXPIRY_DELTA") or "18",
@@ -76,6 +88,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("fee limit must not be negative")
     if args.lnd_hold_expiry_delta < 0:
         parser.error("LND hold expiry delta must not be negative")
+    if args.settle_margin_blocks < 1 or args.settle_margin_seconds < 1:
+        parser.error("settlement margins must be positive")
     if args.backend == "lnd" and (not args.lnd_endpoint or not args.lnd_macaroon):
         parser.error(
             "LND needs --lnd-endpoint and --lnd-macaroon, or their .env settings"
@@ -95,9 +109,17 @@ def main() -> None:
             hold_expiry_delta=args.lnd_hold_expiry_delta,
         )
     else:
-        backend = FakeBackend(args.data / "fake.sqlite3")
+        backend = FakeBackend(
+            args.data / "fake.sqlite3", fee_limit_sat=args.fee_limit_sat
+        )
     seed = load_seed(args.data / "mint.seed")
-    mint = Mint(args.data / "mint.sqlite3", seed, backend)
+    mint = Mint(
+        args.data / "mint.sqlite3",
+        seed,
+        backend,
+        args.settle_margin_blocks,
+        args.settle_margin_seconds,
+    )
     print(f"Mint backend: {args.backend}", file=sys.stderr)
     uvicorn.run(create_app(mint), host=args.host, port=args.port)
 

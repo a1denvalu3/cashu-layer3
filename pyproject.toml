@@ -1,7 +1,7 @@
 [project]
 name = "cashu"
-version = "0.1.0"
-description = "PS tokens bound to whole Lightning hold invoice claims"
+version = "0.2.0"
+description = "Denominated PS tokens backed by expiring Lightning holds"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"

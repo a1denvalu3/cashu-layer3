@@ -343,12 +343,18 @@ class MintPublicKeyPS:
     """
 
     def __init__(
-        self, X2: PublicKey, Y_h2: PublicKey, Y_s2: PublicKey, Y_h1: PublicKey
+        self,
+        X2: PublicKey,
+        Y_h2: PublicKey,
+        Y_s2: PublicKey,
+        Y_h1: PublicKey,
+        keyset_id: Optional[str] = None,
     ):
         self.X2 = X2
         self.Y_h2 = Y_h2
         self.Y_s2 = Y_s2
         self.Y_h1 = Y_h1
+        self._keyset_id = keyset_id
 
     def to_bytes(self) -> bytes:
         return (
@@ -376,8 +382,12 @@ class MintPublicKeyPS:
         version byte, committing to a length-framed preimage of the three
         G2 points and the G1 point Y_h1 (see keys.derive_keyset_id_ps).
 
-        Credentials and presentations carry it so verifiers can select the
-        right parameters across key rotations."""
+        A supplied enclosing denomination keyset ID overrides this individual
+        parameter ID. The application commits that enclosing ID to the full
+        denomination map and selects the matching key when verifying.
+        Credentials and presentations carry the ID across key rotations."""
+        if self._keyset_id is not None:
+            return self._keyset_id
         return derive_keyset_id_ps(
             self.X2.format(),
             self.Y_h2.format(),

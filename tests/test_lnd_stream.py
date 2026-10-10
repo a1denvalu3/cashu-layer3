@@ -11,7 +11,8 @@ from cashu.lightning import FakeBackend, LndRestBackend, PaymentState
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["SUCCEEDED", "FAILED"])
-async def test_payout_uses_router_stream_and_final_state(tmp_path, status):
+@pytest.mark.parametrize("fee_reserve", [None, 2, 0])
+async def test_payout_uses_router_stream_and_final_state(tmp_path, status, fee_reserve):
     backend_db = FakeBackend(tmp_path / "fake.sqlite3")
     request = backend_db.receiver_invoice(1000, PREIMAGE)
     payment_hash = hashlib.sha256(PREIMAGE).hexdigest()
@@ -23,7 +24,7 @@ async def test_payout_uses_router_stream_and_final_state(tmp_path, status):
         assert http_request.url.path == "/v2/router/send"
         body = json.loads(http_request.content)
         assert body["payment_request"] == request
-        assert body["fee_limit_sat"] == "10"
+        assert body["fee_limit_sat"] == str(10 if fee_reserve is None else fee_reserve)
         assert body["no_inflight_updates"] is True
         # Intermediate updates remain safe even if LND disregards the flag.
         updates = [
@@ -33,6 +34,7 @@ async def test_payout_uses_router_stream_and_final_state(tmp_path, status):
                     "payment_hash": payment_hash,
                     "status": status,
                     "payment_preimage": PREIMAGE.hex() if status == "SUCCEEDED" else "",
+                    "fee_msat": "1501" if fee_reserve != 0 else "0",
                 }
             },
         ]
@@ -43,11 +45,14 @@ async def test_payout_uses_router_stream_and_final_state(tmp_path, status):
     backend = LndRestBackend(
         "https://lnd.test", macaroon, transport=httpx.MockTransport(respond)
     )
-    payment = await backend.pay_invoice(request)
+    payment = await backend.pay_invoice(request, fee_reserve)
     assert payment.state == (
         PaymentState.succeeded if status == "SUCCEEDED" else PaymentState.failed
     )
     assert payment.preimage == (PREIMAGE if status == "SUCCEEDED" else None)
+    assert payment.fee_msat == (
+        1501 if status == "SUCCEEDED" and fee_reserve != 0 else 0
+    )
     await backend.close()
 
 

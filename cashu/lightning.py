@@ -41,6 +41,7 @@ class PaymentState(str, Enum):
 class Payment:
     state: PaymentState
     preimage: bytes | None = None
+    fee_msat: int = 0
 
 
 def invoice_details(request: str) -> tuple[str, int]:
@@ -69,7 +70,9 @@ class HoldInvoiceBackend(ABC):
     async def settle_invoice(self, preimage: bytes) -> None: ...
 
     @abstractmethod
-    async def pay_invoice(self, request: str) -> Payment: ...
+    async def pay_invoice(
+        self, request: str, fee_limit_sat: int | None = None
+    ) -> Payment: ...
 
     @abstractmethod
     async def get_payment(self, payment_hash: str) -> Payment | None: ...
@@ -85,11 +88,18 @@ class FakeBackend(HoldInvoiceBackend):
     """Persistent fake funding and settlement for local tests, with no money.
 
     A receiver registers its own invoice and preimage here. The mint API
-    only creates hold invoices and learns the secret from the payout result.
+    creates hold invoices without preimages. A melt supplies the backing
+    preimage separately from the receiver's payout preimage.
     Fake invoice signatures use a fixed test-only key.
     """
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, fee_msat: int = 0, fee_limit_sat: int = 10):
+        if type(fee_msat) is not int or fee_msat < 0:
+            raise ValueError("fake routing fee must be nonnegative millisatoshis")
+        self.fee_msat = fee_msat
+        if type(fee_limit_sat) is not int or fee_limit_sat < 0:
+            raise ValueError("routing fee limit must be nonnegative satoshis")
+        self.fee_limit_sat = fee_limit_sat
         self.db = Database(path)
         with self.db.read() as conn:
             conn.executescript(
@@ -109,6 +119,11 @@ class FakeBackend(HoldInvoiceBackend):
                 );
                 """
             )
+            columns = {r["name"] for r in conn.execute("PRAGMA table_info(payments)")}
+            if "fee_msat" not in columns:
+                conn.execute(
+                    "ALTER TABLE payments ADD COLUMN fee_msat INTEGER NOT NULL DEFAULT 0"
+                )
 
     @staticmethod
     def _invoice(amount: int, payment_hash: str, expiry: int, memo: str) -> str:
@@ -230,14 +245,27 @@ class FakeBackend(HoldInvoiceBackend):
                 (InvoiceState.settled.value, payment_hash),
             )
 
-    async def pay_invoice(self, request: str) -> Payment:
+    async def pay_invoice(
+        self, request: str, fee_limit_sat: int | None = None
+    ) -> Payment:
         payment_hash, _ = invoice_details(request)
         with self.db.transaction() as conn:
             previous = conn.execute(
                 "SELECT * FROM payments WHERE payment_hash=?", (payment_hash,)
             ).fetchone()
             if previous is not None:
-                return Payment(PaymentState(previous["state"]), previous["preimage"])
+                return Payment(
+                    PaymentState(previous["state"]),
+                    previous["preimage"],
+                    previous["fee_msat"],
+                )
+            limit = (
+                self.fee_limit_sat
+                if fee_limit_sat is None
+                else min(fee_limit_sat, self.fee_limit_sat)
+            )
+            if self.fee_msat > limit * 1000:
+                return Payment(PaymentState.failed)
             receiver = conn.execute(
                 "SELECT preimage FROM receivers WHERE request=?", (request,)
             ).fetchone()
@@ -245,10 +273,10 @@ class FakeBackend(HoldInvoiceBackend):
                 return Payment(PaymentState.failed)
             preimage = bytes(receiver["preimage"])
             conn.execute(
-                "INSERT INTO payments VALUES (?,?,?)",
-                (payment_hash, PaymentState.succeeded.value, preimage),
+                "INSERT INTO payments VALUES (?,?,?,?)",
+                (payment_hash, PaymentState.succeeded.value, preimage, self.fee_msat),
             )
-        return Payment(PaymentState.succeeded, preimage)
+        return Payment(PaymentState.succeeded, preimage, self.fee_msat)
 
     async def get_payment(self, payment_hash: str) -> Payment | None:
         with self.db.read() as conn:
@@ -257,7 +285,7 @@ class FakeBackend(HoldInvoiceBackend):
             ).fetchone()
         if row is None:
             return None
-        return Payment(PaymentState(row["state"]), row["preimage"])
+        return Payment(PaymentState(row["state"]), row["preimage"], row["fee_msat"])
 
 
 class LndHTLC(BaseModel):
@@ -294,6 +322,7 @@ class LndPayment(BaseModel):
     payment_hash: str
     status: str
     payment_preimage: str = ""
+    fee_msat: int = Field(default=0, ge=0)
 
 
 class LndPayments(BaseModel):
@@ -437,7 +466,9 @@ class LndRestBackend(HoldInvoiceBackend):
             {"preimage": base64.b64encode(preimage).decode()},
         )
 
-    async def pay_invoice(self, request: str) -> Payment:
+    async def pay_invoice(
+        self, request: str, fee_limit_sat: int | None = None
+    ) -> Payment:
         payment_hash, _ = invoice_details(request)
         previous = await self.get_payment(payment_hash)
         if previous is not None and previous.state != PaymentState.failed:
@@ -450,7 +481,11 @@ class LndRestBackend(HoldInvoiceBackend):
                 "/v2/router/send",
                 json={
                     "payment_request": request,
-                    "fee_limit_sat": str(self.fee_limit_sat),
+                    "fee_limit_sat": str(
+                        self.fee_limit_sat
+                        if fee_limit_sat is None
+                        else min(fee_limit_sat, self.fee_limit_sat)
+                    ),
                     "timeout_seconds": 60,
                     "no_inflight_updates": True,
                 },
@@ -482,7 +517,9 @@ class LndRestBackend(HoldInvoiceBackend):
                                 raise BackendError(
                                     "LND returned an invalid payout preimage"
                                 )
-                            return Payment(PaymentState.succeeded, preimage)
+                            return Payment(
+                                PaymentState.succeeded, preimage, payment.fee_msat
+                            )
         except (httpx.HTTPError, ValueError) as exc:
             raise BackendError("LND payout interrupted; retry to reconcile") from exc
         return Payment(PaymentState.pending)
@@ -511,7 +548,9 @@ class LndRestBackend(HoldInvoiceBackend):
                             raise BackendError(
                                 "LND payment tracking returned an invalid preimage"
                             )
-                        return Payment(PaymentState.succeeded, preimage)
+                        return Payment(
+                            PaymentState.succeeded, preimage, payment.fee_msat
+                        )
                     if payment.status == "FAILED":
                         return Payment(PaymentState.failed)
                     return Payment(PaymentState.pending)

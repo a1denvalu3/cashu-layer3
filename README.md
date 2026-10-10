@@ -1,559 +1,237 @@
-# Cashu
+# Cashu Layer3
 
-A Python mint and wallet for a Layer3 built on held Lightning payments.
-Each token represents one whole HTLC claim, signed with
-Pointcheval–Sanders (PS) signatures on BLS12-381. Holders can transfer that
-claim through private swaps while the original Lightning payment stays pending.
-The final holder burns the token to pay a Lightning invoice and settle its
-backing HTLC.
+An experimental Python mint and wallet for **denominated tokens backed by held
+Lightning payments**. Credentials use Pointcheval–Sanders (PS) signatures on
+BLS12-381. A token can split into smaller denominations and transfer privately
+while its original HTLC remains held. A Lightning melt can spend tokens from
+several HTLCs, including user-funded routing fees and returned change.
 
-Explore the [animated Layer3 field guide](docs/layer3.html) for the protocol
-flow, exact proof relations, and current limitations. Download the HTML file
-and open it in a browser; it works offline without a server or build step.
+**Tokens expire with their backing.** Settlement, cancellation, or timeout ends
+the claim. Holders must redeem before the published redemption cutoff. There
+are no user balances or continuing redemption rights after settlement.
 
-## How Layer3 works
+The [offline protocol guide](docs/layer3.html) illustrates the v3 flow.
 
-The client chooses a 32-byte preimage `P` and computes its payment hash
-`H = SHA256(P)`. The mint creates a HODL invoice for that hash and the requested
-amount. Once the full payment is accepted and held by the Lightning node, the
-mint signs exactly one token for the entire invoice amount.
+## The lifecycle
 
-```text
-Lightning: payer → mint's HODL invoice; the HTLC remains held
-Cashu:     Alice → Bob → Carol; each receiver privately swaps the token
-Burn:      mint pays the holder's invoice and settles the original HTLC
-```
+1. The payer chooses a 32-byte preimage `P` and supplies `H = SHA256(P)` and an
+   amount `A`. The mint creates a HODL invoice. Once fully accepted, it signs
+   denomination tokens whose total equals `A`. Issuance does not reveal `P`.
+2. The signed backing attribute is `h = HashToFr(domain || A || H)`. Every
+   fragment retains this **original HTLC amount**, independently of its own
+   denomination. One keyset contains independent PS keys for `1, 2, 4, 8, ...`
+   sats, through the supported monetary limit.
+3. A swap has many inputs and many outputs, all sharing one hidden `h`.
+   Public denomination values must sum equally. A single common-witness proof
+   establishes equality across every input presentation and output commitment.
+   Swaps can split, combine, or refresh fragments of **one HTLC**; they cannot
+   move value between different backing hashes.
+4. A melt can combine denominations from multiple HTLCs to pay one ordinary
+   BOLT11 invoice. It reveals each backing preimage, reserves every input
+   nullifier, and pays from the mint's outgoing liquidity. The receiver invoice
+   has its own independent payment hash.
+5. The mint charges invoice value plus the actual routing fee, rounded up from
+   millisatoshis to whole sats. It returns unused fee reserve and any additional
+   input value as denomination tokens tied to their original HTLCs.
+6. A partial melt leaves the original hold pending. The mint settles a known
+   preimage when the entire HTLC value has been consumed **including fees**, or
+   at the published cutoff near the node's hold-cancellation deadline. Any
+   outstanding fragments then expire. With no revealed preimage, the mint
+   cannot settle; the hold eventually times out and tokens lose their backing.
 
-Transfers use the mint's swap API and do not settle the backing payment or
-create additional Lightning payments. Every swap has one input and one output
-for the same HTLC claim. There are no denominations, splits, combinations, or
-change: a 12,345-sat token must be transferred or burned as a whole.
+For example, a 1,000-sat hold can become Alice's 990 sats and Bob's 10 sats.
+Bob can pay a 9-sat invoice with a 1-sat fee reserve. If routing is free, he
+receives 1 sat of change and the hold remains pending. At scheduled settlement,
+Alice's 990 sats and Bob's 1 sat expire if still outstanding.
 
-A bearer token carries two distinct secrets:
+This intentionally forfeits unredeemed token value at settlement. Collecting
+an HTLC collects its full amount, even if only a fraction was melted. The mint
+does not turn the remainder into user accounts or an ongoing ecash liability.
+A first revealed preimage also gives the mint the technical ability to settle
+early; delaying settlement is mint policy. This remains a trusted,
+experimental protocol, not a cryptographic guarantee against a dishonest mint.
 
-| Secret | Purpose | What happens on a swap |
-|---|---|---|
-| Owner secret `s` | Authorizes spending and derives the credential's nullifier | Replaced with a fresh secret |
-| HTLC preimage `P` | Lets the mint settle the original held payment at burn | Preserved and passed to the new holder |
+## Run the demo
 
-The **backing HTLC hash and payout invoice hash are independent**. Burning
-pays an ordinary invoice for the token's full amount. The wallet supplies `P`
-with its spending proof; the mint pays the invoice, verifies the payout's own
-preimage, then settles the original HODL invoice using `P`.
-
-| Phase | What the mint learns |
-|---|---|
-| Minting | Backing payment hash, full amount, and owner commitment; the mint computes the signed claim attribute `h` |
-| Private swap | Randomized credential, nullifier, new owner commitment, and blinded claim commitments/proofs; `h`, backing hash, amount, and HTLC preimage stay hidden |
-| Burning | Public claim attribute, backing HTLC preimage and amount, plus the payout invoice |
-
-The transferring wallets know the token's amount, backing hash, and secrets.
-The swap's privacy applies to the information sent to the mint.
-
-## Public backing and expiry
-
-The mint publishes a fresh backing snapshot at `GET /v1/htlcs/pending`.
-It lists issued, fully funded, accepted holds that have not expired or been
-reserved for a burn. Open or unissued invoices, canceled or settled holds,
-underfunded claims, and pending burns are excluded. Each entry contains its
-public backing payment hash, whole amount, and deadline. Preimages, owner
-secrets, nullifiers, credentials, and quote IDs are not published.
-
-Inspect the list with the wallet or HTTP:
-
-```bash
-poetry run cashu --mint http://127.0.0.1:3338 htlcs
-curl --fail http://127.0.0.1:3338/v1/htlcs/pending
-```
-
-The response includes `checked_at` (Unix seconds), `block_height`, and `htlcs`.
-An LND entry reports:
-
-| Field | Meaning |
-|---|---|
-| `payment_hash`, `amount` | Original backing hash and full amount in sats |
-| `htlc_expiry_height` | Earliest CLTV expiry of the currently accepted HTLCs, including multipart payments |
-| `expiry_height` | LND's earlier hold-cancellation height: `htlc_expiry_height - hold_expiry_delta` |
-| `blocks_remaining` | Blocks until that cancellation height, from the snapshot's `block_height` |
-| `invoice_expires_at` | Original invoice funding deadline in Unix seconds; this is **not** the accepted HTLC's expiry |
-| `expires_at` | `null` for LND: block-based expiry has no exact wall-clock timestamp |
-
-The mint setting `CASHU_LND_HOLD_EXPIRY_DELTA` (or
-`mint --lnd-hold-expiry-delta`) must match the backing node's
-`invoices.holdexpirydelta`. It defaults to 18 blocks, as in the LND 0.21.3
-[sample configuration](https://github.com/lightningnetwork/lnd/blob/v0.21.3-beta/sample-lnd.conf).
-The mint accounts for LND's early cancellation behavior; it does not use the
-invoice's payment-request expiry as the held payment's deadline. The fake
-backend instead expires holds by wall clock and returns `expires_at`, with
-the block fields set to `null`.
-
-Before `cashu receive` prepares a swap, it verifies the credential and
-downloads the **entire public list**. It matches the incoming token's backing
-hash and signed amount locally and refuses missing, expired, or inconsistent
-backing. It prints the matching deadline to stderr. No hash-specific query
-reveals which claim the receiver is checking; the swap request still hides
-the hash, amount, `h`, and preimage. Python clients can use
-`client.pending_htlcs()` and `client.check_backing(token)` directly.
-
-The endpoint uses `Cache-Control: no-store`. An unavailable or unsynced node,
-missing accepted-HTLC deadline, or incomplete backend read returns HTTP 503
-instead of a partial or cached list. Saved swap retries recover their exact
-receipt without repeating this preflight check.
-
-This is an authoritative **mint-reported snapshot**, not independent proof
-against a dishonest mint or a guarantee against cancellation after the check.
-Publishing it exposes outstanding backing hashes, amounts, and deadlines to
-everyone. Wallets should refresh it before accepting a claim; traffic timing
-can still correlate activity. Local `LIVE` wallet state and `balance` do not
-constitute a fresh backing check.
-
-## Install and run the demo
-
-Use Python 3.10 or later and Poetry. Run commands from this checkout:
+Requires Python 3.10+ and Poetry:
 
 ```bash
 poetry install
-poetry run python examples/demo.py
+make demo
 ```
 
-The demo uses a persistent fake Lightning backend in a temporary directory.
-It mints a 1000-sat claim, transfers it from Alice to Bob to Carol, pays an
-invoice with an unrelated hash, and settles the original hold. It requires
-no Lightning nodes.
+The persistent fake backend runs in a temporary directory. The demo mints
+1,000 sats, sends exactly 10 through a private split, pays 9 sats, returns unused
+fee reserve, and settles at the cutoff so remaining tokens expire. No Lightning
+node or server is needed.
 
 ## Run a mint
 
-For a local fake backend:
-
 ```bash
-poetry run mint --backend fake --data data/mint
+poetry run mint --backend fake --data data/mint-v3
 ```
 
-For LND, `mint` loads `.env` from the current directory. On first setup, copy
-[.env.example](.env.example) to `.env` and provide the node's TLS certificate
-and macaroon at the configured paths. The example selects cashu-regtest's
-`lnd-3`, with its REST endpoint at `https://localhost:8081`:
+For LND, copy `.env.example` to `.env`, configure the node's REST endpoint,
+TLS certificate and macaroon, and choose a **new v3 mint directory**:
 
 ```bash
-poetry run mint
-```
-
-Environment variables override `.env`; command-line options override both.
-The startup message identifies the selected backend. The default wallet mint
-URL is `http://127.0.0.1:3338`; use `cashu --mint <url> ...` to select another.
-The default wallet database is `data/wallet.sqlite3`.
-
-An explicit LND configuration is also supported:
-
-```bash
-poetry run mint \
-  --backend lnd \
-  --data data/lnd-mint \
-  --lnd-endpoint https://127.0.0.1:8080 \
-  --lnd-macaroon /path/to/admin.macaroon \
+poetry run mint --backend lnd --data data/lnd-v3 \
+  --lnd-endpoint https://127.0.0.1:8081 \
   --lnd-cert /path/to/tls.cert \
-  --fee-limit-sat 10
+  --lnd-macaroon /path/to/admin.macaroon \
+  --fee-limit-sat 10 \
+  --lnd-hold-expiry-delta 18 \
+  --settle-margin-blocks 6
 ```
 
-TLS verification is enabled. The backend uses LND's
-[AddHoldInvoice](https://lightning.engineering/api-docs/api/lnd/invoices/add-hold-invoice/),
-[SendPaymentV2](https://lightning.engineering/api-docs/api/lnd/router/send-payment-v2/),
-and [SettleInvoice](https://lightning.engineering/api-docs/api/lnd/invoices/settle-invoice/)
-APIs. The mint needs outgoing liquidity for payouts and pays routing fees
-from its own balance, within the configured fee limit.
+TLS verification is enabled. The mint loads `.env` in the current directory;
+environment variables override the file and CLI arguments override both. Run
+one server process per database and retain its seed across restarts. The mint
+needs outgoing liquidity for payments while its incoming holds remain pending.
 
-Run one server process per mint database. Keep the mint data directory and
-seed across restarts; the signing key and redemption recovery records live
-there. Restart the server after updating the code. `.env` and `data/` are
-excluded from Git.
+`--lnd-hold-expiry-delta` must match the node's `invoices.holdexpirydelta`.
+LND can cancel accepted holds before their CLTV expiry. The redemption cutoff
+is **earliest accepted HTLC expiry − node cancellation delta − settlement
+margin**; multipart payments use the earliest accepted part. The default
+settlement margin is 6 blocks before cancellation. The fake backend uses a
+120-second margin before its wall-clock expiry (`--settle-margin-seconds`).
+Choose margins for your node's operating conditions. The background worker
+runs every 5 seconds; it cannot settle through a node outage or while stopped.
 
-## Mint, transfer, and burn on regtest
+## Wallet commands
 
-This example uses an already running, synced, funded
-[cashu-regtest](https://github.com/callebtc/cashu-regtest) network. Set it up
-separately. The commands use Docker, `jq`, OpenSSL, and `xxd`, and do not depend
-on another local checkout.
-
-The nodes are `lnd-1` as payer, `lnd-3` as the mint's backend, and `lnd-2` as
-the final payout receiver.
-
-### 1. Start the mint in terminal 1
-
-For first-time configuration:
+The default mint is `http://127.0.0.1:3338` and the default wallet database is
+`data/wallet-v3.sqlite3`. Select another mint or wallet using global flags:
 
 ```bash
-mkdir -p data/lnd-manual
-cp .env.example .env
-docker cp cashu-lnd-3-1:/root/.lnd/tls.cert data/lnd-manual/tls.cert
-docker cp cashu-lnd-3-1:/root/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
-  data/lnd-manual/admin.macaroon
-
-poetry run mint
+poetry run cashu --mint http://127.0.0.1:3338 --wallet data/alice-v3.sqlite3 \
+  mint 1000 <payment_hash> --preimage <32-byte-lowercase-hex>
 ```
 
-If you already configured `.env`, reuse it. The server should report
-`Mint backend: lnd`.
-
-### 2. Request funding in terminal 2
-
-Generate the backing HTLC preimage and hash. SHA256 hashes the decoded
-32 bytes of the preimage:
+The command prints the HODL invoice and waits for funding. Resume an interrupted
+mint with `mint --quote <quote_id>`; its saved commitments and secrets are reused.
+The preimage is stored locally and carried with token proofs.
 
 ```bash
-PREIMAGE=$(openssl rand -hex 32)
-PAYMENT_HASH=$(printf '%s' "$PREIMAGE" | xxd -r -p |
-  openssl dgst -sha256 -r | cut -d ' ' -f1)
+# Split automatically, retaining local change. Send chooses one backing HTLC.
+poetry run cashu --wallet data/alice-v3.sqlite3 send 10
+# If several HTLCs can fund the send, choose --payment-hash <hash>.
 
-poetry run cashu --wallet data/alice.sqlite3 mint 12345 "$PAYMENT_HASH" \
-  --preimage "$PREIMAGE"
+# Receiver downloads the full backing list, then refreshes ownership privately.
+poetry run cashu --wallet data/bob-v3.sqlite3 receive <cashuPS-token>
+
+# Can combine different HTLCs. Covers invoice + reserve and returns fee change.
+poetry run cashu --wallet data/bob-v3.sqlite3 pay <bolt11> --fee-reserve 1
+
+poetry run cashu htlcs
+poetry run cashu list
+poetry run cashu balance --refresh --verbose
+poetry run cashu pending
+poetry run cashu retry <operation_id>
+poetry run cashu abandon <operation_id>
 ```
 
-The mint creates its HODL invoice; no payout invoice is needed yet. The command
-prints the quote JSON, including `request` (the BOLT11 invoice) and `quote`
-(its ID), and waits for funding. `--preimage` saves the secret locally with
-the issuance operation and resulting token. It is not sent to the mint at
-this stage.
+`melt` aliases `pay`. Repeating `--token-id` selects specific inputs for a melt,
+or recovers the exact bundle of `SENT` proofs after lost send output. `decode`
+prints a bearer bundle without spending it. Fake development helpers are
+`dev-accept <hash>` and `dev-invoice <amount>`.
 
-### 3. Fund the HODL invoice in terminal 3
+A send requires one HTLC with enough value. A received bundle containing
+multiple HTLCs is processed as separate swaps, each with its own saved recovery
+operation. Payments may combine them. An unavailable or incomplete public
+backing snapshot fails the acceptance check. No hash-specific request reveals
+which HTLC the receiver is inspecting.
 
-Paste the quote's `request` into:
+Local `LIVE` state and an unrefreshed balance are not proof of current backing.
+`balance --refresh` marks unavailable claims `EXPIRED`; it never revives spent
+proofs. The public full list is a mint-reported snapshot, not independent
+collateral verification, and backing can change after the check.
 
-```bash
-docker exec cashu-lnd-1-1 lncli \
-  --network=regtest --rpcserver=lnd-1:10009 \
-  payinvoice --force "<paste the BOLT11 request from terminal 2>"
-```
+## Melt fees, allocation and recovery
 
-`--force` skips the confirmation prompt. The Lightning payment remains
-pending because the mint has not received its preimage. Once LND reports full
-HTLC acceptance, terminal 2 automatically mints the token, saves it in Alice's
-wallet, and exits. The payer command stays pending until burn.
+`POST /v1/melt/quote/bolt11` returns the exact payout invoice, amount, fee reserve
+and invoice expiry. The default reserve equals `--fee-limit-sat`; the wallet may
+request a smaller reserve, including zero. A reserve above the server limit is
+rejected. LND receives that authorized limit via
+[SendPaymentV2](https://lightning.engineering/api-docs/api/lnd/router/send-payment-v2/).
+The returned and tracked `fee_msat` is retained through retries; the charged fee
+is `ceil(fee_msat / 1000)`.
 
-### 4. Transfer the token in terminal 2
+A combined melt charges HTLC groups in order of their first appearance in the
+inputs. It consumes the first group's selected value before charging the next.
+Change stays with its original group. Before sending, the wallet prepares one
+owner commitment for each possible binary change denomination per group. Once
+the actual fee is known, the mint signs only the required subset. All input
+metadata, input order, the exact melt quote and change commitments are bound
+into every spending proof.
 
-```bash
-poetry run cashu --wallet data/alice.sqlite3 balance
+The mint reserves input nullifiers, each group's selected face value and the
+payout hash in one SQLite transaction. It retains the revealed backing
+preimages before payment. A confirmed payment, change signatures and consumed
+value are stored atomically **before** full-consumption settlement. A response
+lost after payout is recovered from Lightning's tracked payment without paying
+again. Exact retries return the original signatures and receipt.
 
-TOKEN=$(poetry run cashu --wallet data/alice.sqlite3 send 12345)
-poetry run cashu --wallet data/bob.sqlite3 receive "$TOKEN"
-poetry run cashu --wallet data/bob.sqlite3 balance
-```
+A definite payout failure releases all inputs. An uncertain or pending payout
+keeps them reserved. Wallet abandonment requires **every** input to be unspent.
+Failure cannot make a disclosed preimage unknown again: the mint retains it for
+scheduled settlement. A paid melt receipt says `PAID`, regardless of whether
+its backing HTLCs remain held or have subsequently closed.
 
-`send` marks Alice's token `SENT` locally and prints a bearer token string
-containing the owner secret and original HTLC preimage. `receive` reads the
-mint URL from that string, verifies the claim and preimage, and privately
-swaps into a fresh owner secret. The original credential's nullifier becomes
-spent at the mint. Bob retains the same amount, backing hash, and HTLC preimage.
-
-### 5. Burn Bob's token to a normal receiver invoice
-
-Create an invoice for the full amount on `lnd-2`. LND generates the payout's
-own preimage and payment hash:
-
-```bash
-RECEIVER_INVOICE=$(docker exec cashu-lnd-2-1 lncli \
-  --network=regtest --rpcserver=lnd-2:10009 \
-  addinvoice --amt 12345 | jq -r '.payment_request')
-
-poetry run cashu --wallet data/bob.sqlite3 pay "$RECEIVER_INVOICE"
-poetry run cashu --wallet data/bob.sqlite3 balance
-```
-
-`pay` selects an available token by the invoice's full amount. Its payout hash
-does not have to match the token's backing hash. Bob's wallet supplies the
-original HTLC preimage automatically from the token.
-
-A successful burn returns `state: "SETTLED"`, pays `lnd-2`, settles the original
-HODL on `lnd-3`, and reduces Bob's available balance to zero. The payer command
-in terminal 3 finishes successfully. The receipt's `payment_hash` and
-`preimage` describe the backing HTLC; `payout_hash` and `payout_preimage`
-describe the receiver payment.
-
-Verify both invoices independently:
-
-```bash
-PAYOUT_HASH=$(docker exec cashu-lnd-2-1 lncli \
-  --network=regtest --rpcserver=lnd-2:10009 \
-  decodepayreq "$RECEIVER_INVOICE" | jq -r '.payment_hash')
-
-docker exec cashu-lnd-2-1 lncli \
-  --network=regtest --rpcserver=lnd-2:10009 lookupinvoice "$PAYOUT_HASH"
-
-docker exec cashu-lnd-3-1 lncli \
-  --network=regtest --rpcserver=lnd-3:10009 lookupinvoice "$PAYMENT_HASH"
-```
-
-Both invoice states should be `SETTLED`.
-
-For a fake-backend CLI test, use `mint --backend fake --data data/mint`,
-the same mint/send/receive commands, and
-`cashu dev-accept <backing_payment_hash>` in another terminal to simulate
-funding. Create the payout with `cashu dev-invoice 12345` and use its returned
-`request` in `cashu pay`. These helpers use `data/mint/fake.sqlite3` by default;
-pass `--backend-db` when using a different fake data directory.
-
-## Wallet commands and recovery
-
-Place global `--wallet` and `--mint` options before the command. In the
-following examples, prepend `poetry run` when running from this checkout:
-
-| Command | Behavior |
-|---|---|
-| `cashu mint <amount> <payment_hash> --preimage <preimage>` | Create a HODL quote, wait for full acceptance, and save one token |
-| `cashu mint --quote <quote_id>` | Resume a saved issuance request and its funding wait |
-| `cashu quote <amount> <payment_hash>` | Return a funding quote without waiting or minting |
-| `cashu send <amount>` | Export one whole token string and mark it `SENT` locally |
-| `cashu receive <token>` | Verify and privately swap a received token |
-| `cashu pay <invoice>` | Burn one token with the invoice's full amount |
-| `cashu balance` | Show the available `LIVE` balance |
-| `cashu list` | Show token IDs, amounts, backing hashes, and local states |
-| `cashu htlcs` | Fetch the mint's public pending backing list and expiry deadlines |
-| `cashu decode <token>` | Decode the bearer token JSON without spending it |
-| `cashu pending` | List saved operations for recovery |
-| `cashu pending --sent` | List locally sent tokens |
-| `cashu retry <operation_id>` | Retry the exact saved operation |
-| `cashu abandon <operation_id>` | Release a failed swap/burn locally after the mint confirms it is unspent |
-
-If multiple available tokens have the requested amount, `send` and `pay`
-require `--token-id <id>`. They do not split or combine tokens. Mint selection
-can also be restricted with the global `--mint` option.
-
-Ctrl+C stops a mint's funding wait and preserves its saved operation, including
-the owner secret and locally supplied HTLC preimage. Resume with `mint --quote`
-using the same wallet and mint. The HODL invoice remains open or held.
-
-Wallets save operations before sending a spending request. After an interrupted
-connection or lost response, use `pending` and `retry` to recover the original
-result. Exact retries return their original receipts. A payout with an
-uncertain result leaves the token `PENDING`; the mint tracks it and resumes
-settlement after a restart. A definite payout failure releases the token at
-the mint, after which `abandon` can release the wallet's saved operation.
-
-If a send's output was lost, `send <amount> --token-id <id>` returns the same
-saved bearer string. Receiving that string back into the sender's wallet
-reclaims the claim through a swap if its nullifier is still unspent.
-
-### Existing tokens without an HTLC preimage
-
-Attach the original backing preimage when sending or paying:
-
-```bash
-poetry run cashu send 12345 --preimage "$PREIMAGE"
-poetry run cashu pay "$RECEIVER_INVOICE" --preimage "$PREIMAGE"
-```
-
-These are alternative actions for the existing token. The supplied preimage
-must hash to its backing payment hash. Once attached to a sent token, it
-travels with the bearer string and survives subsequent private swaps. You can
-also add `--preimage` when resuming a mint quote that was saved without it.
-
-## Token format
-
-Tokens use the prefix `cashuPS`, followed by unpadded base64url-encoded JSON:
-
-| Field | Contents |
-|---|---|
-| `version` | `2` |
-| `mint` | Mint URL |
-| `amount` | Full HTLC amount in sats |
-| `payment_hash` | Original backing HTLC hash, as 32-byte lowercase hex |
-| `credential` | PS signature, claim attribute, keyset ID, and owner secret |
-| `preimage` | Original backing HTLC preimage, as 32-byte lowercase hex |
-
-Older tokens may omit `preimage`; attach it as described above before sending
-or burning. Token strings and wallet databases contain spending secrets.
-This is an experimental PS encoding; ordinary Cashu wallets cannot decode
-or spend it.
-
-The receiver rebuilds `h` from the declared amount and backing hash, verifies
-the PS credential, and checks that the supplied preimage hashes to that
-backing hash. Relabeling a 1-sat claim as 1,000,000 sats invalidates the
-credential under the same mint key.
+Already authorized payments may still resolve after the cutoff. Recovery
+continues to reconcile those payments, but creates no claim against a closed
+HTLC. Such change is reported as `expired_change`, rather than a user balance
+or newly spendable token. New melts against closed claims are rejected.
 
 ## Cryptography
 
-All scalar arithmetic is modulo the BLS12-381 scalar field order `q`.
-`G1` and `G2` are the respective group generators. The mint's secret key is
-`(x, y_h, y_s)`, with public points:
+For input `i` under denomination key `a_i`, the randomized presentation contains
+`κ_i = h·Y_h2[a_i] + o_i·G2`. For output `j` under denomination key `b_j`, the
+blinded commitment is `B_j = h·Y_h1[b_j] + t_j·G1`.
 
-```text
-X2   = x · G2
-Y_h2 = y_h · G2
-Y_s2 = y_s · G2
-Y_h1 = y_h · G1
-```
+One Fiat–Shamir linear proof uses witnesses `(h, o_1, ..., o_n, t_1, ..., t_m)`
+to prove **all** these equations simultaneously. The shared witness establishes
+all-to-all equality of `h`, without an `n × m` collection of pairwise proofs.
+Each input independently proves credential authenticity and ownership of its
+nullifier. The full ordered input/output destination transcript is bound into
+the ownership and equality proofs.
 
-### Public issuance
+The mint separately checks `sum(a_i) = sum(b_j)`, rejects duplicate inputs and
+output commitments, consumes all input nullifiers atomically, and returns
+fresh blind signatures. The client subtracts `t_j·U_j` to unblind each output.
+Independent denomination keys prevent relabeling small credentials as larger
+ones. Denominations and transaction totals are visible to the mint; backing
+hashes, backing amounts, `h` and preimages remain hidden during swaps.
 
-The mint computes the signed claim attribute from its funded quote:
+A keyset ID commits to the complete ordered denomination/public-parameter map.
+Credentials use that common ID; verification selects the key by denomination.
+`h` commits to the full 32-byte hash and original amount before scalar reduction.
 
-```text
-H = SHA256(P)
-h = int(SHA256(domain || amount_be64 || H), big-endian) mod q
+## API and limits
 
-C = s · G1
-u = k · G1
-v = k · [(x + y_h · h) · G1 + y_s · C]
-```
-
-`domain` is the exact ASCII string `Cashu_PS_HTLC_Claim_v2`. `amount_be64` is
-the full amount in sats, encoded as an unsigned 8-byte big-endian integer,
-and `H` is the full 32-byte hash. One mint key signs every supported amount.
-
-The client proves knowledge of the nonzero owner secret `s` behind `C`.
-The mint chooses fresh, secret, nonzero `k` and returns `(u, v)` together after
-confirming that the entire HODL invoice is accepted and funded. The client
-cannot choose a different amount or `h` in the issuance request.
-
-Fresh secret `k` blocks the fixed-base attribute forgery. With `u = G1`, an
-attacker could replace `h` with `h★` using
-`v★ = v + (h★ − h) · Y_h1`. With `u = k · G1`, this change requires
-`y_h · u = k · Y_h1`, a computational Diffie–Hellman computation in `G1`.
-The client's later credential randomization provides privacy.
-
-### Private swaps and nullifiers
-
-The holder chooses fresh randomness `ρ`, `o`, `t` and a new owner secret
-`s_new`, with `C_new = s_new · G1`:
-
-```text
-u′   = ρ · u
-v″   = ρ · v + o · u′
-κ_h  = h · Y_h2 + o · G2
-U_s  = s · u′
-N    = s · G_NULL
-B    = h · Y_h1 + t · G1
-```
-
-`G_NULL` is a public hash-to-group base. The mint verifies the randomized
-credential through the pairing equation:
-
-```text
-e(v″, G2) = e(u′, X2 + κ_h) · e(U_s, Y_s2)
-```
-
-The owner/nullifier proof has witness `s` and public points
-`(G_NULL, u′, N, U_s)`. It proves both relations using the same secret:
-
-```text
-U_s = s · u′
-N   = s · G_NULL
-```
-
-The claim equality proof has witnesses `(h, o, t)` and public points
-`(κ_h, B, Y_h2, G2, Y_h1, G1)`. It proves:
-
-```text
-κ_h = h · Y_h2 + o · G2
-B   = h · Y_h1 + t · G1
-```
-
-Both spending proofs bind `C_new`. The mint also verifies knowledge of the
-new owner secret behind that commitment. Together, these checks preserve the
-same signed `h` and tie the input credential to its nullifier without
-revealing the claim or owner secret.
-
-The mint atomically consumes `N`, chooses fresh `k`, and returns:
-
-```text
-U     = k · G1
-V_raw = k · [x · G1 + B + y_s · C_new]
-V     = V_raw − t · U
-```
-
-The client unblinds `V_raw` to obtain a credential for `(h, s_new)`. This uses
-one `POST /v1/swap`, with `(U, V_raw)` returned in the same response. It adapts
-PS signing of message commitments
-([section 6.1](https://eprint.iacr.org/2020/450.pdf)).
-
-Rerandomizing an input credential does not change `N`, so it cannot bypass
-the spent-nullifier check. A successful swap replaces `s` and therefore gives
-the output credential a new nullifier. The HTLC preimage remains bearer data;
-it is not a swap-proof witness and is not sent in the swap request.
-
-### Public authentication and burning
-
-A credential's signature can be checked through a pairing equation, using
-`U_s = s · u`:
-
-```text
-e(v, G2) = e(u, X2 + h · Y_h2) · e(U_s, Y_s2)
-```
-
-`verify_signature` requires neither `s` nor the HTLC preimage as inputs.
-The holder's `verify_credential` check uses its local credential and creates
-no ZK proof. Spending additionally requires the owner/nullifier proof.
-There is no separate show endpoint.
-
-At burn, the holder sends the original preimage, a public-`h` spending
-presentation, and the payout invoice. The mint recomputes the backing hash
-from the preimage and checks `h` against that hash and full amount. The
-spending proof binds the payout invoice and amount. The payout invoice's
-own hash is used to track its payment; the supplied backing preimage settles
-the original hold.
-
-## API
-
-FastAPI serves request and response schemas at `/docs`.
+FastAPI provides schemas at `/docs`.
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /v1/info` | Protocol capabilities |
-| `GET /v1/keys` | Common PS public parameters |
-| `GET /v1/htlcs/pending` | Public live backing hashes, whole amounts, and expiry deadlines |
-| `POST /v1/mint/quote/bolt11` | Create a supplied-hash HODL invoice |
-| `GET /v1/mint/quote/bolt11/{quote}` | Funding and issuance status |
-| `POST /v1/mint/bolt11` | Sign the owner commitment after full HTLC acceptance |
-| `POST /v1/swap` | Privately preserve the whole claim and replace its owner secret |
-| `POST /v1/checkstate` | Nullifier states: `UNSPENT`, `PENDING`, or `SPENT` |
-| `POST /v1/burn` | Pay a whole-amount invoice and settle the backing hold |
+| `GET /v1/info`, `GET /v1/keys` | Capabilities and denomination public keys |
+| `GET /v1/htlcs/pending` | Fresh full backing list and redemption cutoffs |
+| `POST /v1/mint/quote/bolt11` | Supplied-hash HODL invoice |
+| `GET /v1/mint/quote/bolt11/{quote}` | Funding/issuance status |
+| `POST /v1/mint/bolt11` | Issue a denomination batch for the full funded amount |
+| `POST /v1/swap` | Private, value-conserving, same-HTLC many-to-many swap |
+| `POST /v1/melt/quote/bolt11` | Payout quote and routing fee reserve |
+| `POST /v1/melt/bolt11` | Combined melt and original-HTLC fee change |
+| `POST /v1/checkstate` | `UNSPENT`, `PENDING`, or `SPENT` nullifier states |
 
-A mint quote accepts `amount`, `unit: "sat"`, `payment_hash` (32-byte lowercase
-hex), and optional `expiry`. It creates the HODL invoice through the node and
-returns its BOLT11 request. Neither quoting nor issuance receives the HTLC
-preimage.
+Batches allow up to 256 inputs or outputs; melt change commitments also have a
+256-slot limit. For very large mixed-HTLC batches, use smaller payments or select
+fewer inputs. Bearer bundles use experimental `cashuPS` JSON/base64 encoding,
+with token version 3, and are incompatible with ordinary Cashu wallets.
 
-Current swap requests use `version: 2`, with a private presentation, new owner
-commitment/proof, blinded commitment `b`, and claim equality proof.
-
-A burn request contains:
-
-| Field | Meaning |
-|---|---|
-| `amount` | Whole token amount in sats; must equal the payout invoice amount |
-| `presentation` | Randomized spending presentation with public `h` and nullifier proof |
-| `request` | Payout BOLT11 invoice, whose hash can be unrelated to the backing HTLC |
-| `preimage` | Original backing HTLC preimage |
-
-The mint reserves the nullifier, backing claim, and payout hash. It stores
-the confirmed payout receipt before settling the backing hold, allowing
-recovery without paying twice. A settled response includes `amount`,
-`payment_hash`, `preimage`, `payout_hash`, and `payout_preimage`.
-
-## Compatibility and scope
-
-Current version-2 tokens, keys, and mint databases remain usable. Tokens
-missing their preimage can attach it through `send --preimage` or
-`pay --preimage`. Saved requests from the earlier two-round swap and same-hash
-burn flows remain recoverable through `cashu retry`.
-
-New receive operations require the mint's public pending-HTLC endpoint.
-Update the mint and wallet together; an older mint without that endpoint
-causes the backing check to fail rather than accepting an unchecked claim.
-
-Earlier payment-hash-only tokens and populated databases belong to a different
-protocol; they require a new database for this whole-claim scheme.
-
-Tokens are conditional claims on held payments. Cancellation or HTLC timeout
-can remove their backing even if a credential's signature still verifies.
-The private swap does not reveal the backing hash, so the mint does not query
-that individual hold during a swap. The receiver checks the public full list
-before preparing the swap, but the backing can change after that snapshot.
-The mint remains trusted for custody and settlement. This prototype and its
-cryptography are experimental.
-
-Splitting, combining, change, cross-mint redemption, and interoperability with
-ordinary Cashu token formats are outside this protocol.
+Version-2 tokens, saved operations and databases are deliberately rejected.
+There is no automatic conversion of old whole-claim balances into v3. Preserve
+old databases and complete their claims using the previous version; use fresh
+mint and wallet directories for this protocol.
 
 ## Verification
 
@@ -561,36 +239,13 @@ ordinary Cashu token formats are outside this protocol.
 make test
 make check
 make demo
-```
-
-Run the live integration test against your existing cashu-regtest network:
-
-```bash
 make regtest
 ```
 
-It verifies one 12,345-sat token, two private swaps while the original payer
-remains pending, payment of an unrelated receiver invoice, settlement of the
-backing hold, and idempotent retries.
-It also verifies the public backing deadline while held and removal from
-the pending list after settlement.
+The live runner uses an existing funded, synced cashu-regtest network and does
+not provision nodes, fund channels or mine blocks. Its full-value melt requests
+a zero fee reserve, requiring a fee-free route (normally a direct channel) to
+avoid needing an extra token beyond the held amount. CLI options can override
+node containers, REST endpoint and node hold-cancellation delta.
 
-The defaults use containers `cashu-lnd-1-1` as payer, `cashu-lnd-3-1` as mint,
-and `cashu-lnd-2-1` as receiver, with the mint's REST API at
-`https://localhost:8081`. The test copies credentials into a temporary
-directory. Missing or stopped containers, unsynced nodes, insufficient channel
-liquidity, or an unavailable or mismatched REST endpoint cause an error.
-
-The runner does not start or stop nodes, mine blocks, fund wallets, or open
-channels. Override node names and the REST endpoint with `--payer-container`,
-`--mint-container`, `--receiver-container`, and `--lnd-endpoint`.
-Use `--lnd-hold-expiry-delta` if the node's hold-expiry setting differs from
-the default:
-
-```bash
-poetry run python tests/regtest/run.py --help
-```
-
-The BLS12-381 PS primitives were extracted from `cashu-nft`. Source attribution
-and implementation changes are recorded in [PROVENANCE.md](PROVENANCE.md);
-the original MIT license is retained in [LICENSE.md](LICENSE.md).
+Source attribution is retained in [PROVENANCE.md](PROVENANCE.md). MIT licensed.

@@ -1,10 +1,14 @@
+"""Version 3: denomination credentials bound to expiring HTLC claims."""
+
 import hashlib
+import json
 from enum import Enum
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from .crypto.bls import curve_order
+from .keyset import DENOMINATIONS, MAX_AMOUNT
 
 Hex32 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 G1Hex = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{96}$")]
@@ -12,8 +16,9 @@ KeysetId = Annotated[str, StringConstraints(pattern=r"^03[0-9a-f]{64}$")]
 ProofHex = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{128}$")]
 PresentationHex = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{642}$")]
 PrivatePresentationHex = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{770}$")]
-LinearProofHex = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{256}$")]
-Amount = Annotated[int, Field(strict=True, gt=0, le=21_000_000 * 100_000_000)]
+Amount = Annotated[int, Field(strict=True, gt=0, le=MAX_AMOUNT)]
+Sats = Annotated[int, Field(strict=True, ge=0, le=MAX_AMOUNT)]
+MAX_PROOFS = 256
 
 
 class WireModel(BaseModel):
@@ -47,8 +52,6 @@ class QuoteResponse(WireModel):
 
 
 class PendingHTLC(WireModel):
-    """Public backing metadata; expiry_height includes LND's early cancellation."""
-
     payment_hash: Hex32
     amount: Amount
     invoice_expires_at: Annotated[int, Field(ge=0)]
@@ -56,6 +59,8 @@ class PendingHTLC(WireModel):
     expiry_height: Annotated[int, Field(ge=0)] | None = None
     blocks_remaining: Annotated[int, Field(ge=0)] | None = None
     expires_at: Annotated[int, Field(ge=0)] | None = None
+    melt_deadline_height: Annotated[int, Field(ge=0)] | None = None
+    melt_deadline: Annotated[int, Field(ge=0)] | None = None
 
 
 class PendingHTLCsResponse(WireModel):
@@ -67,68 +72,116 @@ class PendingHTLCsResponse(WireModel):
 class KeysetResponse(WireModel):
     id: KeysetId
     unit: Literal["sat"] = "sat"
-    public_key: str
+    keys: dict[int, str]
 
 
-class MintRequest(WireModel):
-    quote: Hex32
+class Denominated(WireModel):
+    amount: Amount
+
+    @model_validator(mode="after")
+    def denomination(self):
+        if self.amount not in DENOMINATIONS:
+            raise ValueError("amount must be a supported binary denomination")
+        return self
+
+
+class Output(Denominated):
     commitment: G1Hex
     proof: ProofHex
 
 
-class SignatureResponse(WireModel):
+class BlindOutput(Output):
+    b: G1Hex
+
+
+class MintRequest(WireModel):
+    quote: Hex32
+    outputs: Annotated[list[Output], Field(min_length=1, max_length=MAX_PROOFS)]
+
+
+class SignatureResponse(Denominated):
     keyset_id: KeysetId
     u: G1Hex
     v: G1Hex
+    payment_hash: Hex32 | None = None
+
+
+class SignaturesResponse(WireModel):
+    signatures: list[SignatureResponse]
+
+
+class SwapInput(Denominated):
+    presentation: PrivatePresentationHex
 
 
 class SwapRequest(WireModel):
-    """Preserve the signed HTLC claim without revealing h, hash, or amount."""
-
-    presentation: PrivatePresentationHex
-    commitment: G1Hex
-    owner_proof: ProofHex
-    b: G1Hex
-    equality_proof: LinearProofHex
-    # Missing version identifies saved requests from the earlier two-round swap.
-    version: Literal[1, 2] = 1
+    version: Literal[3] = 3
+    inputs: Annotated[list[SwapInput], Field(min_length=1, max_length=MAX_PROOFS)]
+    outputs: Annotated[list[BlindOutput], Field(min_length=1, max_length=MAX_PROOFS)]
+    equality_proof: Annotated[
+        str, StringConstraints(pattern=r"^[0-9a-f]+$", max_length=33024)
+    ]
 
 
-class BurnRequest(WireModel):
-    amount: Amount
-    presentation: PresentationHex
+class MeltQuoteRequest(WireModel):
     request: Annotated[str, StringConstraints(min_length=1, max_length=4096)]
-    # Absent only in saved requests from the earlier same-hash payout flow.
-    preimage: Hex32 | None = None
+    fee_reserve: Sats | None = None
 
 
-class BurnResponse(WireModel):
-    state: Literal["SETTLED"] = "SETTLED"
-    amount: Amount
+class MeltQuoteResponse(WireModel):
+    quote: Hex32
+    request: str
     payment_hash: Hex32
+    amount: Amount
+    fee_reserve: Sats
+    expiry: int
+
+
+class MeltInput(Denominated):
+    backing_amount: Amount
     preimage: Hex32
-    payout_hash: Hex32 | None = None
-    payout_preimage: Hex32 | None = None
+    presentation: PresentationHex
+
+
+class ChangeOutput(Output):
+    payment_hash: Hex32
+
+
+class MeltRequest(WireModel):
+    quote: Hex32
+    inputs: Annotated[list[MeltInput], Field(min_length=1, max_length=MAX_PROOFS)]
+    change: Annotated[list[ChangeOutput], Field(max_length=MAX_PROOFS)]
+
+
+class MeltResponse(WireModel):
+    state: Literal["PAID"] = "PAID"
+    amount: Amount
+    fee: Sats
+    fee_msat: Annotated[int, Field(strict=True, ge=0)]
+    payout_hash: Hex32
+    payout_preimage: Hex32
+    change: list[SignatureResponse]
+    expired_change: Sats = 0
 
 
 class CheckRequest(WireModel):
-    nullifiers: Annotated[list[G1Hex], Field(min_length=1, max_length=100)]
+    nullifiers: Annotated[list[G1Hex], Field(min_length=1, max_length=MAX_PROOFS)]
 
 
 class CheckResponse(WireModel):
     states: list[Literal["UNSPENT", "PENDING", "SPENT"]]
 
 
-class Token(WireModel):
-    version: Literal[2] = 2
-    mint: Annotated[str, StringConstraints(min_length=1, max_length=2048)]
-    amount: Amount
+class TokenProof(Denominated):
     payment_hash: Hex32
+    backing_amount: Amount
     credential: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{386}$")]
     preimage: Hex32 | None = None
 
     @model_validator(mode="after")
-    def validate_preimage(self) -> "Token":
+    def validate_backing(self):
+        if self.amount > self.backing_amount:
+            raise ValueError("denomination exceeds backing HTLC amount")
         if (
             self.preimage is not None
             and preimage_hash(self.preimage) != self.payment_hash
@@ -136,8 +189,50 @@ class Token(WireModel):
             raise ValueError("HTLC preimage does not match the token payment hash")
         return self
 
+
+class Token(WireModel):
+    version: Literal[3] = 3
+    mint: Annotated[str, StringConstraints(min_length=1, max_length=2048)]
+    proofs: Annotated[list[TokenProof], Field(min_length=1, max_length=MAX_PROOFS)]
+
+    @model_validator(mode="after")
+    def validate_proofs(self):
+        from .crypto.ps import Credential
+
+        identities = [
+            Credential.from_bytes(bytes.fromhex(p.credential)).s for p in self.proofs
+        ]
+        if len(set(identities)) != len(identities):
+            raise ValueError("duplicate token proof")
+        if self.amount > MAX_AMOUNT:
+            raise ValueError("token amount exceeds maximum")
+        backing: dict[str, tuple[int, str | None]] = {}
+        for proof in self.proofs:
+            previous = backing.setdefault(
+                proof.payment_hash, (proof.backing_amount, proof.preimage)
+            )
+            if previous != (proof.backing_amount, proof.preimage):
+                raise ValueError("inconsistent backing metadata")
+        return self
+
+    @property
+    def amount(self) -> int:
+        return sum(p.amount for p in self.proofs)
+
+    @property
+    def payment_hash(self) -> str:
+        if len({p.payment_hash for p in self.proofs}) != 1:
+            raise ValueError("token contains multiple backing HTLCs")
+        return self.proofs[0].payment_hash
+
     def with_preimage(self, preimage: str) -> "Token":
-        return Token.model_validate(self.model_dump() | {"preimage": preimage})
+        return Token(
+            mint=self.mint,
+            proofs=[
+                TokenProof.model_validate(p.model_dump() | {"preimage": preimage})
+                for p in self.proofs
+            ],
+        )
 
 
 def preimage_hash(preimage: str) -> str:
@@ -147,34 +242,44 @@ def preimage_hash(preimage: str) -> str:
 
 
 def htlc_claim_scalar(payment_hash: str, amount: int) -> int:
-    """Commit to the full Lightning hash and whole invoice amount in sats.
-
-    This is a PS attribute, separate from Lightning's SHA256(preimage).
-    Hash before reducing into Fr so raw payment hashes separated by the
-    curve order cannot be substituted for one another.
-    """
-    if type(amount) is not int or not 0 < amount <= 21_000_000 * 100_000_000:
+    if type(amount) is not int or not 0 < amount <= MAX_AMOUNT:
         raise ValueError("invalid HTLC amount")
     if len(payment_hash) != 64 or any(
         c not in "0123456789abcdef" for c in payment_hash
     ):
         raise ValueError("payment hash must be 32-byte lowercase hex")
     encoded = (
-        b"Cashu_PS_HTLC_Claim_v2"
+        b"Cashu_PS_HTLC_Claim_v3"
         + amount.to_bytes(8, "big")
         + bytes.fromhex(payment_hash)
     )
     return int.from_bytes(hashlib.sha256(encoded).digest(), "big") % curve_order
 
 
-def burn_binding(amount: int, request: str) -> bytes:
-    """Bind a spend to its exact payout invoice and amount."""
-    return (
-        b"Cashu_PS_HTLC_Redeem_v2"
-        + amount.to_bytes(8, "big")
-        + hashlib.sha256(request.encode()).digest()
+def transcript(domain: str, payload: object) -> bytes:
+    return hashlib.sha256(
+        domain.encode()
+        + json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).digest()
+
+
+def swap_binding(inputs: list[tuple[int, str]], outputs: list[BlindOutput]) -> bytes:
+    return transcript(
+        "Cashu_PS_HTLC_Swap_v3",
+        {"inputs": inputs, "outputs": [p.model_dump() for p in outputs]},
     )
 
 
-def swap_binding(commitment: bytes) -> bytes:
-    return b"Cashu_PS_HTLC_Swap_v2" + commitment
+def melt_binding(
+    quote: MeltQuoteResponse,
+    inputs: list[tuple[int, int, str, str]],
+    change: list[ChangeOutput],
+) -> bytes:
+    return transcript(
+        "Cashu_PS_HTLC_Melt_v3",
+        {
+            "quote": quote.model_dump(),
+            "inputs": inputs,
+            "change": [p.model_dump() for p in change],
+        },
+    )

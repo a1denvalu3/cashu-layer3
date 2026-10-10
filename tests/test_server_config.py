@@ -18,6 +18,8 @@ def isolated_configuration(tmp_path, monkeypatch):
         "CASHU_LND_MACAROON",
         "CASHU_FEE_LIMIT_SAT",
         "CASHU_LND_HOLD_EXPIRY_DELTA",
+        "CASHU_SETTLE_MARGIN_BLOCKS",
+        "CASHU_SETTLE_MARGIN_SECONDS",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -65,6 +67,8 @@ def test_cli_overrides_environment_which_overrides_dotenv(tmp_path, monkeypatch)
         "CASHU_MINT_PORT=invalid\n",
         "CASHU_FEE_LIMIT_SAT=-1\n",
         "CASHU_LND_HOLD_EXPIRY_DELTA=-1\n",
+        "CASHU_SETTLE_MARGIN_BLOCKS=0\n",
+        "CASHU_SETTLE_MARGIN_SECONDS=-1\n",
     ],
 )
 def test_invalid_configuration_fails_instead_of_using_fake(tmp_path, configuration):
