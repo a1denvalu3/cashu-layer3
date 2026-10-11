@@ -12,6 +12,12 @@ are no user balances or continuing redemption rights after settlement.
 
 The [offline protocol guide](docs/layer3.html) illustrates the v3 flow.
 
+The [web wallet](web-wallet/README.md) uses local modified Coco and cashu-ts
+workspaces for this protocol. Run `cd web-wallet && npm ci && npm run dev` and
+open http://127.0.0.1:5173 with your mint running. It supports HODL funding,
+private token transfers, combined Lightning melts, expiry tracking, encrypted
+backups, and retries after a reload. Mint endpoints enable browser CORS.
+
 ## The lifecycle
 
 1. The payer chooses a 32-byte preimage `P` and supplies `H = SHA256(P)` and an

@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from fastapi import FastAPI, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .db import BackendError, MintError
@@ -49,6 +50,12 @@ def create_app(mint: Mint, recovery: bool = True) -> FastAPI:
             await mint.backend.close()
 
     app = FastAPI(title="Cashu Layer3", version="0.2.0", lifespan=lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type"],
+    )
 
     @app.exception_handler(MintError)
     async def mint_error(request: Request, exc: MintError):

@@ -1,0 +1,323 @@
+import type { EventBus, CoreEvents } from '@core/events';
+import type { Logger } from '../../logging/Logger.ts';
+import type { MintQuoteRepository } from '../../repositories';
+import type { SubscriptionManager, UnsubscribeHandler } from '@core/infra/SubscriptionManager.ts';
+import type { MintQuoteResponse } from '@cashu/cashu-ts';
+import type { MintQuoteService } from '../MintQuoteService';
+import type { MintService } from '../MintService';
+
+type QuoteKey = string; // `${mintUrl}::${quoteId}`
+
+function toKey(mintUrl: string, quoteId: string): QuoteKey {
+  return `${mintUrl}::${quoteId}`;
+}
+
+export interface MintQuoteWatcherOptions {
+  // If true, on start() the watcher will also load and watch all quotes that are not ISSUED yet
+  watchExistingPendingOnStart?: boolean;
+}
+
+export class MintQuoteWatcherService {
+  private readonly repo: MintQuoteRepository;
+  private readonly subs: SubscriptionManager;
+  private readonly mintService: MintService;
+  private readonly quotes: MintQuoteService;
+  private readonly bus: EventBus<CoreEvents>;
+  private readonly logger?: Logger;
+  private readonly options: MintQuoteWatcherOptions;
+
+  private running = false;
+  private unsubscribeByKey = new Map<QuoteKey, UnsubscribeHandler>();
+  private offCreated?: () => void;
+  private offAdded?: () => void;
+  private offUntrusted?: () => void;
+
+  constructor(
+    repo: MintQuoteRepository,
+    subs: SubscriptionManager,
+    mintService: MintService,
+    quotes: MintQuoteService,
+    bus: EventBus<CoreEvents>,
+    logger?: Logger,
+    options: MintQuoteWatcherOptions = { watchExistingPendingOnStart: true },
+  ) {
+    this.repo = repo;
+    this.subs = subs;
+    this.mintService = mintService;
+    this.quotes = quotes;
+    this.bus = bus;
+    this.logger = logger;
+    this.options = options;
+  }
+
+  isRunning(): boolean {
+    return this.running;
+  }
+
+  async start(): Promise<void> {
+    if (this.running) return;
+    this.running = true;
+    this.logger?.info('MintQuoteWatcherService started');
+
+    // Subscribe to newly created quotes
+    this.offCreated = this.bus.on('mint-quote:created', async ({ mintUrl, quoteId }) => {
+      try {
+        await this.watchQuote(mintUrl, quoteId);
+      } catch (err) {
+        this.logger?.error('Failed to start watching quote from event', { mintUrl, quoteId, err });
+      }
+    });
+
+    // Also watch added quotes that are not in terminal state
+    this.offAdded = this.bus.on('mint-quote:added', async ({ mintUrl, quoteId, quote }) => {
+      // Only watch if not already in terminal state
+      if (quote.state !== 'ISSUED' && quote.state !== 'PAID') {
+        try {
+          await this.watchQuote(mintUrl, quoteId);
+        } catch (err) {
+          this.logger?.error('Failed to start watching added quote', {
+            mintUrl,
+            quoteId,
+            state: quote.state,
+            err,
+          });
+        }
+      }
+    });
+
+    // Stop watching quotes when mint is untrusted
+    this.offUntrusted = this.bus.on('mint:untrusted', async ({ mintUrl }) => {
+      try {
+        await this.stopWatchingMint(mintUrl);
+      } catch (err) {
+        this.logger?.error('Failed to stop watching mint quotes on untrust', { mintUrl, err });
+      }
+    });
+
+    if (this.options.watchExistingPendingOnStart) {
+      // Also watch any quotes that are not ISSUED yet (only for trusted mints)
+      try {
+        const pending = await this.repo.getPendingMintQuotes();
+        const byMint = new Map<string, string[]>();
+        for (const q of pending) {
+          let arr = byMint.get(q.mintUrl);
+          if (!arr) {
+            arr = [];
+            byMint.set(q.mintUrl, arr);
+          }
+          arr.push(q.quote);
+        }
+        for (const [mintUrl, quoteIds] of byMint.entries()) {
+          // Only watch quotes for trusted mints
+          const trusted = await this.mintService.isTrustedMint(mintUrl);
+          if (!trusted) {
+            this.logger?.debug('Skipping pending quotes for untrusted mint', {
+              mintUrl,
+              count: quoteIds.length,
+            });
+            continue;
+          }
+
+          try {
+            await this.watchQuote(mintUrl, quoteIds);
+          } catch (err) {
+            this.logger?.warn('Failed to watch pending quotes batch', {
+              mintUrl,
+              count: quoteIds.length,
+              err,
+            });
+          }
+        }
+      } catch (err) {
+        this.logger?.error('Failed to load pending mint quotes to watch', { err });
+      }
+    }
+  }
+
+  async stop(): Promise<void> {
+    if (!this.running) return;
+    this.running = false;
+
+    if (this.offCreated) {
+      try {
+        this.offCreated();
+      } catch {
+        // ignore
+      } finally {
+        this.offCreated = undefined;
+      }
+    }
+
+    if (this.offAdded) {
+      try {
+        this.offAdded();
+      } catch {
+        // ignore
+      } finally {
+        this.offAdded = undefined;
+      }
+    }
+
+    if (this.offUntrusted) {
+      try {
+        this.offUntrusted();
+      } catch {
+        // ignore
+      } finally {
+        this.offUntrusted = undefined;
+      }
+    }
+
+    const entries = Array.from(this.unsubscribeByKey.entries());
+    this.unsubscribeByKey.clear();
+    for (const [key, unsub] of entries) {
+      try {
+        await unsub();
+        this.logger?.debug('Stopped watching quote', { key });
+      } catch (err) {
+        this.logger?.warn('Failed to unsubscribe watcher', { key, err });
+      }
+    }
+    this.logger?.info('MintQuoteWatcherService stopped');
+  }
+
+  async watchQuote(mintUrl: string, quoteOrQuotes: string | string[]): Promise<void> {
+    if (!this.running) return;
+
+    // Only watch quotes for trusted mints
+    const trusted = await this.mintService.isTrustedMint(mintUrl);
+    if (!trusted) {
+      this.logger?.debug('Skipping watch for untrusted mint', { mintUrl });
+      return;
+    }
+
+    const input = Array.isArray(quoteOrQuotes) ? quoteOrQuotes : [quoteOrQuotes];
+    const unique = Array.from(new Set(input));
+    // Filter out already-watched
+    const toWatch = unique.filter((id) => !this.unsubscribeByKey.has(toKey(mintUrl, id)));
+    if (toWatch.length === 0) return;
+
+    // Chunk into batches of 100
+    const chunks: string[][] = [];
+    for (let i = 0; i < toWatch.length; i += 100) {
+      chunks.push(toWatch.slice(i, i + 100));
+    }
+
+    for (const batch of chunks) {
+      // Determine subscription kind based on the first quote in batch
+      // NOTE: This assumes all quotes in a batch have the same method.
+      // Since we are grouping by ID only here, we need to look up the quote method.
+      // However, checkMintQuote logic is driven by the ID.
+      // We should ideally group by method too, but for now we look up each quote.
+
+      // OPTIMIZATION: We are not grouping by method here, which is problematic if we mix BOLT11/12
+      // in the same call. But typical usage is watching one quote or loading pending (which could be mixed).
+
+      // Let's split the batch by method first.
+      const bolt11: string[] = [];
+      const bolt12: string[] = [];
+
+      for (const quoteId of batch) {
+          const quote = await this.repo.getMintQuote(mintUrl, quoteId);
+          if (quote?.method === 'bolt12') {
+              bolt12.push(quoteId);
+          } else {
+              bolt11.push(quoteId);
+          }
+      }
+
+      const subscribeToBatch = async (ids: string[], kind: 'bolt11_mint_quote' | 'bolt12_mint_quote') => {
+        if (ids.length === 0) return;
+
+        const { subId, unsubscribe } = await this.subs.subscribe<MintQuoteResponse>(
+          mintUrl,
+          kind,
+          ids,
+          async (payload) => {
+            // Only act on state changes we care about
+            if (payload.state !== 'PAID' && payload.state !== 'ISSUED') return;
+
+            const quoteId = payload.quote;
+            if (!quoteId) return;
+            const key = toKey(mintUrl, quoteId);
+
+            // Update the local state from the remote state
+            try {
+              const method = kind === 'bolt12_mint_quote' ? 'bolt12' : 'bolt11';
+              await this.quotes.updateStateFromRemote(mintUrl, quoteId, payload.state, method);
+            } catch (err) {
+              this.logger?.error('Failed to update quote state from remote', {
+                mintUrl,
+                quoteId,
+                state: payload.state,
+                err,
+              });
+            }
+
+            // Stop watching if the quote reached a terminal state
+            if (payload.state === 'ISSUED') {
+              await this.stopWatching(key);
+            }
+          },
+        );
+
+        // Per-batch unsubscribe wrapper
+        let didUnsubscribe = false;
+        const remaining = new Set(ids);
+        const groupUnsubscribeOnce: UnsubscribeHandler = async () => {
+          if (didUnsubscribe) return;
+          didUnsubscribe = true;
+          await unsubscribe();
+        };
+
+        // Register per-quote stoppers that shrink the remaining set and
+        // unsubscribe the entire batch when the last quote is removed
+        for (const quoteId of ids) {
+          const key = toKey(mintUrl, quoteId);
+          const perKeyStop: UnsubscribeHandler = async () => {
+            if (remaining.has(quoteId)) remaining.delete(quoteId);
+            if (remaining.size === 0) {
+              await groupUnsubscribeOnce();
+            }
+          };
+          this.unsubscribeByKey.set(key, perKeyStop);
+        }
+
+        this.logger?.debug(`Watching ${kind} batch`, { mintUrl, subId, count: ids.length });
+      };
+
+      await subscribeToBatch(bolt11, 'bolt11_mint_quote');
+      await subscribeToBatch(bolt12, 'bolt12_mint_quote');
+    }
+  }
+
+  private async stopWatching(key: QuoteKey): Promise<void> {
+    const unsubscribe = this.unsubscribeByKey.get(key);
+    if (!unsubscribe) return;
+    try {
+      await unsubscribe();
+    } catch (err) {
+      this.logger?.warn('Unsubscribe watcher failed', { key, err });
+    } finally {
+      this.unsubscribeByKey.delete(key);
+    }
+  }
+
+  async stopWatchingMint(mintUrl: string): Promise<void> {
+    this.logger?.info('Stopping all quote watchers for mint', { mintUrl });
+    const prefix = `${mintUrl}::`;
+    const keysToStop: QuoteKey[] = [];
+
+    for (const key of this.unsubscribeByKey.keys()) {
+      if (key.startsWith(prefix)) {
+        keysToStop.push(key);
+      }
+    }
+
+    for (const key of keysToStop) {
+      await this.stopWatching(key);
+    }
+
+    this.logger?.info('Stopped quote watchers for mint', { mintUrl, count: keysToStop.length });
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "@cashu/cashu-ts",
+  "version": "3.3.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts",
+    "./layer3": "./src/layer3/index.ts"
+  },
+  "dependencies": {
+    "@noble/curves": "2.0.1",
+    "@noble/hashes": "2.0.1",
+    "@scure/base": "2.0.0",
+    "@scure/bip32": "2.0.1",
+    "zod": "3.25.76",
+    "light-bolt11-decoder": "3.2.0"
+  },
+  "layer3Fork": true
+}

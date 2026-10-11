@@ -1,4 +1,4 @@
-.PHONY: test check format demo regtest regtest-spark
+.PHONY: test check format demo regtest regtest-spark wallet wallet-check wallet-browser
 
 test:
 	poetry run pytest -q
@@ -20,3 +20,12 @@ regtest:
 
 regtest-spark:
 	poetry run python tests/regtest/spark.py
+
+wallet:
+	cd web-wallet && npm run dev
+
+wallet-check:
+	cd web-wallet && npm run build && npm test
+
+wallet-browser:
+	cd web-wallet && npm run test:e2e

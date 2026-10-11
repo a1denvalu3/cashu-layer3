@@ -1,0 +1,243 @@
+import type { MintQuoteRepository } from '../repositories';
+import type { MintService } from './MintService';
+import type { WalletService } from './WalletService';
+import type { ProofService } from './ProofService';
+import type { MintQuoteBolt11Response, MintQuoteState } from '@cashu/cashu-ts';
+import type { CoreEvents, EventBus } from '@core/events';
+import type { Logger } from '../logging/Logger.ts';
+import { mapProofToCoreProof } from '@core/utils.ts';
+import { UnknownMintError } from '../models/Error';
+import type { MintQuote } from '../models/MintQuote';
+
+export class MintQuoteService {
+  private readonly mintQuoteRepo: MintQuoteRepository;
+  private readonly mintService: MintService;
+  private readonly walletService: WalletService;
+  private readonly proofService: ProofService;
+  private readonly eventBus: EventBus<CoreEvents>;
+  private readonly logger?: Logger;
+
+  constructor(
+    mintQuoteRepo: MintQuoteRepository,
+    mintService: MintService,
+    walletService: WalletService,
+    proofService: ProofService,
+    eventBus: EventBus<CoreEvents>,
+    logger?: Logger,
+  ) {
+    this.mintQuoteRepo = mintQuoteRepo;
+    this.mintService = mintService;
+    this.walletService = walletService;
+    this.proofService = proofService;
+    this.eventBus = eventBus;
+    this.logger = logger;
+  }
+
+  async createMintQuote(
+    mintUrl: string,
+    amount: number,
+    options?: { method?: 'bolt11' | 'bolt12' },
+  ): Promise<MintQuote> {
+    const method = options?.method ?? 'bolt11';
+    this.logger?.info('Creating mint quote', { mintUrl, amount, method });
+
+    const trusted = await this.mintService.isTrustedMint(mintUrl);
+    if (!trusted) {
+      throw new UnknownMintError(`Mint ${mintUrl} is not trusted`);
+    }
+
+    try {
+      const { wallet } = await this.walletService.getWalletWithActiveKeysetId(mintUrl);
+      let quote: MintQuoteBolt11Response;
+      if (method === 'bolt12') {
+        // @ts-ignore
+        quote = await wallet.createMintQuoteBolt12(amount);
+      } else {
+        quote = await wallet.createMintQuoteBolt11(amount);
+      }
+      const quoteModel: MintQuote = { ...quote, mintUrl, method };
+      await this.mintQuoteRepo.addMintQuote(quoteModel);
+      await this.eventBus.emit('mint-quote:created', {
+        mintUrl,
+        quoteId: quote.quote,
+        quote: quoteModel,
+      });
+      return quoteModel;
+    } catch (err) {
+      this.logger?.error('Failed to create mint quote', { mintUrl, amount, method, err });
+      throw err;
+    }
+  }
+
+  async redeemMintQuote(mintUrl: string, quoteId: string): Promise<void> {
+    this.logger?.info('Redeeming mint quote', { mintUrl, quoteId });
+
+    const trusted = await this.mintService.isTrustedMint(mintUrl);
+    if (!trusted) {
+      throw new UnknownMintError(`Mint ${mintUrl} is not trusted`);
+    }
+
+    try {
+      const quote = await this.mintQuoteRepo.getMintQuote(mintUrl, quoteId);
+      if (!quote) {
+        this.logger?.warn('Mint quote not found', { mintUrl, quoteId });
+        throw new Error('Quote not found');
+      }
+      if (!quote.amount) {
+        this.logger?.warn('Mint quote had undefined amount', { mintUrl, quoteId });
+        throw new Error('Quote amount undefined');
+      }
+      const { wallet } = await this.walletService.getWalletWithActiveKeysetId(mintUrl);
+      const { keep } = await this.proofService.createOutputsAndIncrementCounters(mintUrl, {
+        keep: quote.amount,
+        send: 0,
+      });
+
+      let proofs;
+      if (quote.method === 'bolt12') {
+        // @ts-ignore
+        proofs = await wallet.mintProofsBolt12(quote.amount, quote.quote, undefined, {
+          type: 'custom',
+          data: keep,
+        });
+      } else {
+        proofs = await wallet.mintProofsBolt11(quote.amount, quote.quote, undefined, {
+          type: 'custom',
+          data: keep,
+        });
+      }
+
+      await this.eventBus.emit('mint-quote:redeemed', { mintUrl, quoteId, quote });
+      this.logger?.info('Mint quote redeemed, proofs minted', {
+        mintUrl,
+        quoteId,
+        amount: quote.amount,
+        proofs: proofs.length,
+        method: quote.method,
+      });
+      await this.setMintQuoteState(mintUrl, quoteId, 'ISSUED');
+      await this.proofService.saveProofs(mintUrl, mapProofToCoreProof(mintUrl, 'ready', proofs));
+      this.logger?.debug('Proofs saved to repository', { mintUrl, count: proofs.length });
+    } catch (err) {
+      this.logger?.error('Failed to redeem mint quote', { mintUrl, quoteId, err });
+      throw err;
+    }
+  }
+
+  async addExistingMintQuotes(
+    mintUrl: string,
+    quotes: MintQuoteBolt11Response[],
+    options?: { method?: 'bolt11' | 'bolt12' },
+  ): Promise<{ added: string[]; skipped: string[] }> {
+    const method = options?.method ?? 'bolt11';
+    this.logger?.info('Adding existing mint quotes', { mintUrl, count: quotes.length, method });
+
+    const added: string[] = [];
+    const skipped: string[] = [];
+
+    for (const quote of quotes) {
+      try {
+        // Check if quote already exists
+        const existing = await this.mintQuoteRepo.getMintQuote(mintUrl, quote.quote);
+        if (existing) {
+          this.logger?.debug('Quote already exists, skipping', { mintUrl, quoteId: quote.quote });
+          skipped.push(quote.quote);
+          continue;
+        }
+
+        // Add the quote to the repository
+        const quoteModel: MintQuote = { ...quote, mintUrl, method };
+        await this.mintQuoteRepo.addMintQuote(quoteModel);
+        added.push(quote.quote);
+
+        // Emit the added event - processor will handle PAID quotes
+        await this.eventBus.emit('mint-quote:added', {
+          mintUrl,
+          quoteId: quote.quote,
+          quote: quoteModel,
+        });
+
+        this.logger?.debug('Added existing mint quote', {
+          mintUrl,
+          quoteId: quote.quote,
+          state: quote.state,
+          method,
+        });
+      } catch (err) {
+        this.logger?.error('Failed to add existing mint quote', {
+          mintUrl,
+          quoteId: quote.quote,
+          err,
+        });
+        skipped.push(quote.quote);
+      }
+    }
+
+    this.logger?.info('Finished adding existing mint quotes', {
+      mintUrl,
+      added: added.length,
+      skipped: skipped.length,
+    });
+
+    return { added, skipped };
+  }
+
+  async updateStateFromRemote(
+    mintUrl: string,
+    quoteId: string,
+    state: MintQuoteState,
+    method?: 'bolt11' | 'bolt12',
+  ): Promise<void> {
+    this.logger?.info('Updating mint quote state from remote', { mintUrl, quoteId, state, method });
+    await this.setMintQuoteState(mintUrl, quoteId, state, method);
+  }
+
+  private async setMintQuoteState(
+    mintUrl: string,
+    quoteId: string,
+    state: MintQuoteState,
+    method?: 'bolt11' | 'bolt12',
+  ): Promise<void> {
+    this.logger?.debug('Setting mint quote state', { mintUrl, quoteId, state });
+    await this.mintQuoteRepo.setMintQuoteState(mintUrl, quoteId, state);
+    await this.eventBus.emit('mint-quote:state-changed', { mintUrl, quoteId, state, method });
+    this.logger?.debug('Mint quote state updated', { mintUrl, quoteId, state });
+  }
+
+  /**
+   * Requeue all PAID (but not yet ISSUED) quotes for processing.
+   * Only requeues quotes for trusted mints.
+   * Emits `mint-quote:requeue` for each PAID quote so the processor can enqueue them.
+   */
+  async requeuePaidMintQuotes(mintUrl?: string): Promise<{ requeued: string[] }> {
+    const requeued: string[] = [];
+    try {
+      const pending = await this.mintQuoteRepo.getPendingMintQuotes();
+      for (const q of pending) {
+        if (mintUrl && q.mintUrl !== mintUrl) continue;
+        if (q.state !== 'PAID') continue;
+
+        // Only requeue for trusted mints
+        const trusted = await this.mintService.isTrustedMint(q.mintUrl);
+        if (!trusted) {
+          this.logger?.debug('Skipping requeue for untrusted mint', {
+            mintUrl: q.mintUrl,
+            quoteId: q.quote,
+          });
+          continue;
+        }
+
+        await this.eventBus.emit('mint-quote:requeue', {
+          mintUrl: q.mintUrl,
+          quoteId: q.quote,
+          method: q.method,
+        });
+        requeued.push(q.quote);
+      }
+      this.logger?.info('Requeued PAID mint quotes', { count: requeued.length, mintUrl });
+    } catch (err) {
+      this.logger?.error('Failed to requeue PAID mint quotes', { mintUrl, err });
+    }
+    return { requeued };
+  }
+}

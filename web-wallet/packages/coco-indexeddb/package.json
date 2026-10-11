@@ -1,0 +1,16 @@
+{
+  "name": "coco-cashu-indexeddb",
+  "version": "1.1.2-rc.42",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./index.ts",
+    "./layer3": "./src/layer3/index.ts"
+  },
+  "dependencies": {
+    "coco-cashu-core": "file:../coco",
+    "dexie": "4.0.11"
+  },
+  "layer3Fork": true
+}

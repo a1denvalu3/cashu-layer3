@@ -58,3 +58,9 @@ transfer UUID/fee cap were added for this project's protocol.
 The live Spark runner adapts the local operator/SSP/Esplora connection setup
 from the same repository's `tests/spark.py`. Payments use the unmodified,
 optional `breez-sdk-spark` 0.17.2 Python package.
+
+## Web wallet workspaces
+
+The browser wallet vendors compatible modified cashu-ts and Coco runtime source.
+Exact revisions, retained licenses, and Layer3 additions are listed in
+[web-wallet/PROVENANCE.md](web-wallet/PROVENANCE.md).
