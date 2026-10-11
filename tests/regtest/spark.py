@@ -23,7 +23,7 @@ from mnemonic import Mnemonic
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from cashu.api import create_app  # noqa: E402
-from cashu.client import Client  # noqa: E402
+from cashu.client import Client, ClientError  # noqa: E402
 from cashu.mint import Mint  # noqa: E402
 from cashu.models import InvoiceState  # noqa: E402
 from cashu.sparkl2 import SparkBackend, SparkConnection  # noqa: E402
@@ -34,7 +34,7 @@ SSP = "http://127.0.0.1:5000"
 ESPLORA = "http://127.0.0.1:30000"
 
 
-async def compose(service, *args):
+async def compose(service, *args, timeout=60):
     process = await asyncio.create_subprocess_exec(
         "docker",
         "compose",
@@ -50,7 +50,7 @@ async def compose(service, *args):
         stderr=asyncio.subprocess.PIPE,
     )
     try:
-        stdout, _ = await asyncio.wait_for(process.communicate(), 60)
+        stdout, _ = await asyncio.wait_for(process.communicate(), timeout)
     except BaseException as exc:
         if process.returncode is None:
             process.kill()
@@ -69,12 +69,15 @@ async def lightning(*args):
     return json.loads(
         await compose(
             "clightning-2",
+            "timeout",
+            "180",
             "lightning-cli",
             "--network=regtest",
             "-N",
             "none",
             "--json",
             *args,
+            timeout=185,
         )
     )
 
@@ -199,8 +202,10 @@ async def main():
                 async def paid():
                     try:
                         return await asyncio.to_thread(client.finish_melt, operation)
-                    except Exception:
-                        return None
+                    except ClientError as exc:
+                        if "pending" in str(exc) or "HTTP 503" in str(exc):
+                            return None
+                        raise
 
                 receipt = await wait_until("partial payout", paid)
                 change = await asyncio.to_thread(client.melt_change, operation, receipt)
@@ -254,6 +259,41 @@ async def main():
                 await asyncio.wait_for(asyncio.gather(*funding), 60)
                 print(
                     "PASS: full melt including fee settles backing and releases the original payer",
+                    flush=True,
+                )
+
+                first, _ = await fund(25)
+                second, preimage = await fund(37)
+                combined = first.model_copy(
+                    update={"proofs": first.proofs + second.proofs}
+                )
+                payout = await lightning(
+                    "invoice", "40000", str(uuid4()), "combined melt"
+                )
+                operation = await asyncio.to_thread(
+                    client.prepare_melt, combined, payout["bolt11"], fee_reserve=10
+                )
+                receipt = await wait_until("combined payout", paid)
+                change = await asyncio.to_thread(client.melt_change, operation, receipt)
+                if change.amount != 62 - 40 - receipt.fee:
+                    raise RuntimeError("combined melt change does not conserve value")
+                if any(
+                    proof.payment_hash != second.proofs[0].payment_hash
+                    for proof in change.proofs
+                ):
+                    raise RuntimeError("combined change moved between backing HTLCs")
+                if (
+                    await backend.get_invoice(first.proofs[0].payment_hash)
+                ).state != InvoiceState.settled:
+                    raise RuntimeError("combined melt did not settle exhausted backing")
+                if (
+                    await backend.get_invoice(second.proofs[0].payment_hash)
+                ).state != InvoiceState.accepted:
+                    raise RuntimeError("combined melt settled partial backing early")
+                await backend.settle_invoice(preimage)
+                await asyncio.wait_for(asyncio.gather(*funding), 60)
+                print(
+                    "PASS: combined melt conserves change and settles only the exhausted HTLC",
                     flush=True,
                 )
         finally:

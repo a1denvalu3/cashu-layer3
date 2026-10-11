@@ -147,9 +147,12 @@ never used for regtest. Against a funded local `cashu-regtest` Spark fixture, ru
 `make regtest-spark` to exercise real held funding, private swaps, partial
 melts, delayed claims and full-redemption settlement. `CASHU_REGTEST_DIR` and
 `CASHU_REGTEST_PROJECT` select the fixture directory and Compose project.
-The current local OpenSSP fixture can fail wallet funding with `persisted split
-does not match the requested parent and values`; this prevented completing the
-live run. Adapter and mint tests cover these flows with the pinned SDK's models.
+The local OpenSSP fixture needs the split-recovery and HODL receive patches in
+`~/cashu-regtest/spark/ssp-build/`. Its `spark/export-config.sh` exports the
+running stack's public certificates and endpoints to a connection JSON file.
+The live runner verifies held funding, private swaps, partial and combined
+melts with change, delayed claims, and full-redemption settlement against that
+fixture.
 
 ## Wallet commands
 
