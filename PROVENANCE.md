@@ -44,3 +44,17 @@ domains. V2 mint/wallet databases and tokens are rejected instead of being
 reinterpreted. Nullifier bases and low-level proof encodings are retained.
 Tokens expire with their backing; delayed settlement creates no post-closure
 user balances or continuing redemption rights.
+
+## Spark backend
+
+`cashu/sparkl2.py` adapts the Python Breez initialization, payment preparation,
+fee checks and payment-hash recovery in the existing `cashu-nft` integration,
+`cashu/lightning/sparkl2.py` (last file commit
+`a9749146c6bd7f9ab75375a050e9ba795cee301c`), under the retained MIT license.
+The hold-invoice interface, terminal backing
+states, HTLC deadline mapping, backend receipt database and durable outgoing
+transfer UUID/fee cap were added for this project's protocol.
+
+The live Spark runner adapts the local operator/SSP/Esplora connection setup
+from the same repository's `tests/spark.py`. Payments use the unmodified,
+optional `breez-sdk-spark` 0.17.2 Python package.

@@ -1,4 +1,4 @@
-.PHONY: test check format demo regtest
+.PHONY: test check format demo regtest regtest-spark
 
 test:
 	poetry run pytest -q
@@ -17,3 +17,6 @@ demo:
 
 regtest:
 	poetry run python tests/regtest/run.py
+
+regtest-spark:
+	poetry run python tests/regtest/spark.py

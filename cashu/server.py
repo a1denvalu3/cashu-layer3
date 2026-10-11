@@ -40,7 +40,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--backend",
-        choices=["fake", "lnd"],
+        choices=["fake", "lnd", "spark"],
         default=configuration.get("CASHU_MINT_BACKEND") or "fake",
     )
     parser.add_argument(
@@ -79,9 +79,28 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=configuration.get("CASHU_LND_HOLD_EXPIRY_DELTA") or "18",
         help="must match LND's invoices.holdexpirydelta (default: 18 blocks)",
     )
+    parser.add_argument(
+        "--spark-mnemonic-file",
+        type=Path,
+        default=configuration.get("CASHU_SPARK_MNEMONIC_FILE"),
+        help="file containing the Spark wallet mnemonic",
+    )
+    parser.set_defaults(spark_mnemonic=configuration.get("CASHU_SPARK_MNEMONIC"))
+    parser.add_argument(
+        "--spark-network",
+        choices=["mainnet", "regtest"],
+        default=configuration.get("CASHU_SPARK_NETWORK") or "mainnet",
+    )
+    parser.set_defaults(spark_api_key=configuration.get("CASHU_SPARK_API_KEY"))
+    parser.add_argument(
+        "--spark-config-file",
+        type=Path,
+        default=configuration.get("CASHU_SPARK_CONFIG_FILE"),
+        help="private regtest operator, SSP and Esplora connection JSON",
+    )
     args = parser.parse_args(argv)
-    if args.backend not in {"fake", "lnd"}:
-        parser.error("CASHU_MINT_BACKEND must be fake or lnd")
+    if args.backend not in {"fake", "lnd", "spark"}:
+        parser.error("CASHU_MINT_BACKEND must be fake, lnd or spark")
     if not 0 <= args.port <= 65535:
         parser.error("mint port must be between 0 and 65535")
     if args.fee_limit_sat < 0:
@@ -94,24 +113,57 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error(
             "LND needs --lnd-endpoint and --lnd-macaroon, or their .env settings"
         )
+    if args.backend == "spark":
+        if not args.spark_mnemonic_file and not args.spark_mnemonic:
+            parser.error("Spark needs --spark-mnemonic-file or CASHU_SPARK_MNEMONIC")
+        if args.spark_network not in {"mainnet", "regtest"}:
+            parser.error("CASHU_SPARK_NETWORK must be mainnet or regtest")
+        if args.spark_network == "regtest" and not args.spark_config_file:
+            parser.error("Spark regtest needs --spark-config-file")
+        if args.spark_network != "regtest" and args.spark_config_file:
+            parser.error("custom Spark endpoints require --spark-network regtest")
     return args
 
 
-def main() -> None:
-    args = parse_args()
-    backend: HoldInvoiceBackend
+def create_backend(args: argparse.Namespace) -> HoldInvoiceBackend:
     if args.backend == "lnd":
-        backend = LndRestBackend(
+        return LndRestBackend(
             args.lnd_endpoint,
             args.lnd_macaroon,
             args.lnd_cert,
             args.fee_limit_sat,
             hold_expiry_delta=args.lnd_hold_expiry_delta,
         )
-    else:
-        backend = FakeBackend(
-            args.data / "fake.sqlite3", fee_limit_sat=args.fee_limit_sat
+    if args.backend == "spark":
+        # Keep the native SDK optional for fake/LND installations.
+        try:
+            from .sparkl2 import SparkBackend, load_connection
+        except ImportError:
+            raise SystemExit(
+                "Spark needs its optional SDK: poetry install -E spark"
+            ) from None
+        mnemonic = (
+            args.spark_mnemonic_file.read_text().strip()
+            if args.spark_mnemonic_file
+            else args.spark_mnemonic
         )
+        connection = (
+            load_connection(args.spark_config_file) if args.spark_config_file else None
+        )
+        return SparkBackend(
+            args.data / "spark.sqlite3",
+            mnemonic,
+            args.spark_network,
+            args.spark_api_key,
+            args.fee_limit_sat,
+            connection,
+        )
+    return FakeBackend(args.data / "fake.sqlite3", fee_limit_sat=args.fee_limit_sat)
+
+
+def main() -> None:
+    args = parse_args()
+    backend = create_backend(args)
     seed = load_seed(args.data / "mint.seed")
     mint = Mint(
         args.data / "mint.sqlite3",

@@ -98,6 +98,59 @@ settlement margin is 6 blocks before cancellation. The fake backend uses a
 Choose margins for your node's operating conditions. The background worker
 runs every 5 seconds; it cannot settle through a node outage or while stopped.
 
+### Spark with the Breez Python SDK
+
+Install the optional SDK and select a dedicated mint wallet and data directory:
+
+```bash
+poetry install -E spark
+poetry run mint --backend spark --data data/spark-v3 \
+  --spark-mnemonic-file /path/to/mint-spark.mnemonic \
+  --spark-network mainnet --fee-limit-sat 10 --settle-margin-seconds 120
+```
+
+The mnemonic file contains the Spark wallet's seed phrase. Alternatively, set
+`CASHU_SPARK_MNEMONIC` in the environment or `.env`. Set `CASHU_SPARK_API_KEY`
+to your Breez API key. Retain the wallet mnemonic, mint seed, `spark.sqlite3`
+and `spark-sdk/` storage together across restarts. Run one mint process for this
+wallet and do not share its SDK storage with another application. The mint's
+Spark wallet needs its own spendable Bitcoin balance for outgoing melts.
+Incoming invoice fees must be zero; the adapter rejects funding quotes with
+a fee so issued denominations equal the full backing amount.
+
+The adapter extends Nutshell's `SparkL2Wallet` integration with
+[Breez conditional payments](https://sdk-doc-spark.breez.technology/guide/htlcs.html):
+incoming BOLT11 invoices use the user's payment hash, and the mint waits for a
+funded pending HTLC before issuing tokens. It supplies the preimage through
+`claim_htlc_payment` only when settling. The redemption cutoff uses the funded
+HTLC's `expiry_time` minus `--settle-margin-seconds`, independently of BOLT11
+invoice expiry. Returned, expired and claimed contracts permanently close
+their tokens; partial melts do not create post-settlement user balances.
+Backing checks use SDK-synchronized payment history. SDK 0.17.2 can retain
+cached state when an internal synchronization fails, so these snapshots are
+not independent proof that a contract remains held.
+
+Melts always pay through Lightning so a payment preimage is available. The
+quoted Lightning fee must fit the user's reserve and the server limit. Before
+sending, the adapter saves the SDK's transfer UUID and original fee cap. After
+a lost response it checks all pages of SDK payment history and reuses the same
+UUID and fee cap if the payment is not yet cached. Uncertain outcomes keep
+inputs reserved; a completed payment without its preimage remains pending.
+
+The pinned Breez SDK supports `mainnet` and `regtest`. Private regtest requires
+`--spark-network regtest --spark-config-file /path/to/spark-regtest.json`.
+The JSON supplies `coordinator_identifier`, `threshold`, `signing_operators`
+(each with `id`, `identifier`, `address`, `identity_public_key`, optional
+`ca_cert_pem`), `ssp_url`, `ssp_identity_public_key`, `esplora_url`, and optional
+`schema_endpoint` (default `graphql/spark/rc`). Public operator defaults are
+never used for regtest. Against a funded local `cashu-regtest` Spark fixture, run
+`make regtest-spark` to exercise real held funding, private swaps, partial
+melts, delayed claims and full-redemption settlement. `CASHU_REGTEST_DIR` and
+`CASHU_REGTEST_PROJECT` select the fixture directory and Compose project.
+The current local OpenSSP fixture can fail wallet funding with `persisted split
+does not match the requested parent and values`; this prevented completing the
+live run. Adapter and mint tests cover these flows with the pinned SDK's models.
+
 ## Wallet commands
 
 The default mint is `http://127.0.0.1:3338` and the default wallet database is

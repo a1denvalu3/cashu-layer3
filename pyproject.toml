@@ -15,6 +15,9 @@ dependencies = [
   "python-dotenv>=1,<2",
 ]
 
+[project.optional-dependencies]
+spark = ["breez-sdk-spark==0.17.2"]
+
 [project.scripts]
 mint = "cashu.server:main"
 cashu = "cashu.cli:main"
@@ -28,6 +31,7 @@ pytest = ">=8,<9"
 pytest-asyncio = ">=0.24,<1"
 ruff = ">=0.7"
 mypy = ">=1.11"
+mnemonic = ">=0.21,<1"
 
 [build-system]
 requires = ["poetry-core>=2.1,<3"]

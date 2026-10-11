@@ -20,6 +20,11 @@ def isolated_configuration(tmp_path, monkeypatch):
         "CASHU_LND_HOLD_EXPIRY_DELTA",
         "CASHU_SETTLE_MARGIN_BLOCKS",
         "CASHU_SETTLE_MARGIN_SECONDS",
+        "CASHU_SPARK_MNEMONIC",
+        "CASHU_SPARK_MNEMONIC_FILE",
+        "CASHU_SPARK_API_KEY",
+        "CASHU_SPARK_NETWORK",
+        "CASHU_SPARK_CONFIG_FILE",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -69,6 +74,10 @@ def test_cli_overrides_environment_which_overrides_dotenv(tmp_path, monkeypatch)
         "CASHU_LND_HOLD_EXPIRY_DELTA=-1\n",
         "CASHU_SETTLE_MARGIN_BLOCKS=0\n",
         "CASHU_SETTLE_MARGIN_SECONDS=-1\n",
+        "CASHU_MINT_BACKEND=spark\n",
+        "CASHU_MINT_BACKEND=spark\nCASHU_SPARK_MNEMONIC=test\nCASHU_SPARK_NETWORK=signet\n",
+        "CASHU_MINT_BACKEND=spark\nCASHU_SPARK_MNEMONIC=test\nCASHU_SPARK_NETWORK=regtest\n",
+        "CASHU_MINT_BACKEND=spark\nCASHU_SPARK_MNEMONIC=test\nCASHU_SPARK_CONFIG_FILE=local.json\n",
     ],
 )
 def test_invalid_configuration_fails_instead_of_using_fake(tmp_path, configuration):
@@ -76,3 +85,20 @@ def test_invalid_configuration_fails_instead_of_using_fake(tmp_path, configurati
     with pytest.raises(SystemExit) as exc:
         parse_args([])
     assert exc.value.code == 2
+
+
+def test_spark_configuration_uses_file_and_environment(tmp_path, monkeypatch):
+    (tmp_path / ".env").write_text(
+        "CASHU_MINT_BACKEND=spark\n"
+        "CASHU_SPARK_MNEMONIC_FILE=wallet.mnemonic\n"
+        "CASHU_SPARK_API_KEY=test-key\n"
+        "CASHU_SPARK_NETWORK=mainnet\n"
+    )
+    args = parse_args([])
+    assert args.backend == "spark"
+    assert args.spark_mnemonic_file == Path("wallet.mnemonic")
+    assert args.spark_api_key == "test-key"
+    monkeypatch.setenv("CASHU_SPARK_NETWORK", "regtest")
+    args = parse_args(["--spark-config-file", "local.json"])
+    assert args.spark_network == "regtest"
+    assert args.spark_config_file == Path("local.json")
