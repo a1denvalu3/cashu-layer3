@@ -76,6 +76,28 @@ afterAll(async () => {
 });
 
 describe("Python mint ↔ browser cashu-ts protocol", () => {
+  it("reads the mint lifetime policy and supports mints without block settings", async () => {
+    expect(wallet.defaultTokenLifetimeBlocks).toBeNull();
+    expect(wallet.fundingHtlcCltvDelta).toBeNull();
+    const configured = new PSWallet(mintUrl, async (input, init) => {
+      const response = await fetch(input, init);
+      if (String(input).endsWith("/v1/info")) {
+        return new Response(
+          JSON.stringify({
+            ...(await response.json()),
+            default_token_lifetime_blocks: 2016,
+            funding_htlc_cltv_delta: 2040,
+          }),
+          { headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return response;
+    });
+    await configured.loadMint();
+    expect(configured.defaultTokenLifetimeBlocks).toBe(2016);
+    expect(configured.fundingHtlcCltvDelta).toBe(2040);
+    expect(configured.keysetId).toBe(wallet.keysetId);
+  });
   it("issues and verifies denomination credentials and privately swaps many to many", async () => {
     const token = await mint(1000);
     expect(token.proofs.map((p) => p.amount)).toEqual([

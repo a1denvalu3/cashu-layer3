@@ -357,6 +357,7 @@ class LndRestBackend(HoldInvoiceBackend):
         fee_limit_sat: int = 10,
         transport: httpx.AsyncBaseTransport | None = None,
         hold_expiry_delta: int = 18,
+        cltv_expiry: int = 0,
     ):
         if not endpoint.startswith("https://"):
             raise ValueError("LND REST endpoint must use https")
@@ -364,9 +365,12 @@ class LndRestBackend(HoldInvoiceBackend):
             raise ValueError("fee limit must not be negative")
         if hold_expiry_delta < 0:
             raise ValueError("hold expiry delta must not be negative")
+        if type(cltv_expiry) is not int or not 0 <= cltv_expiry <= 65535:
+            raise ValueError("LND final CLTV delta must be between 0 and 65535 blocks")
         tls = ssl.create_default_context(cafile=str(cert_path) if cert_path else None)
         self.fee_limit_sat = fee_limit_sat
         self.hold_expiry_delta = hold_expiry_delta
+        self.cltv_expiry = cltv_expiry
         self.client = httpx.AsyncClient(
             base_url=endpoint.rstrip("/"),
             headers={"Grpc-Metadata-macaroon": macaroon_path.read_bytes().hex()},
@@ -401,6 +405,7 @@ class LndRestBackend(HoldInvoiceBackend):
                     "hash": base64.b64encode(bytes.fromhex(payment_hash)).decode(),
                     "value": str(amount),
                     "expiry": str(expiry),
+                    "cltv_expiry": str(self.cltv_expiry),
                     "memo": "Layer 3 hold",
                 },
             )

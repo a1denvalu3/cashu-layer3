@@ -81,6 +81,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="must match LND's invoices.holdexpirydelta (default: 18 blocks)",
     )
     parser.add_argument(
+        "--lnd-token-lifetime-blocks",
+        type=int,
+        default=configuration.get("CASHU_LND_TOKEN_LIFETIME_BLOCKS") or "2016",
+        help="requested redeemable lifetime for new LND holds (default: 2016 blocks, about two weeks)",
+    )
+    parser.add_argument(
         "--spark-mnemonic-file",
         type=Path,
         default=configuration.get("CASHU_SPARK_MNEMONIC_FILE"),
@@ -110,6 +116,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("LND hold expiry delta must not be negative")
     if args.settle_margin_blocks < 1 or args.settle_margin_seconds < 1:
         parser.error("settlement margins must be positive")
+    if args.lnd_token_lifetime_blocks < 1:
+        parser.error("LND token lifetime must be positive")
+    if (
+        args.lnd_token_lifetime_blocks
+        + args.lnd_hold_expiry_delta
+        + args.settle_margin_blocks
+        > 65535
+    ):
+        parser.error(
+            "LND token lifetime plus cancellation and settlement margins must not exceed 65535 blocks"
+        )
     if args.backend == "lnd" and (not args.lnd_endpoint or not args.lnd_macaroon):
         parser.error(
             "LND needs --lnd-endpoint and --lnd-macaroon, or their .env settings"
@@ -134,6 +151,11 @@ def create_backend(args: argparse.Namespace) -> HoldInvoiceBackend:
             args.lnd_cert,
             args.fee_limit_sat,
             hold_expiry_delta=args.lnd_hold_expiry_delta,
+            cltv_expiry=(
+                args.lnd_token_lifetime_blocks
+                + args.lnd_hold_expiry_delta
+                + args.settle_margin_blocks
+            ),
         )
     if args.backend == "spark":
         # Keep the native SDK optional for fake/LND installations.

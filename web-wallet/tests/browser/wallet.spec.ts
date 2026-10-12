@@ -3,6 +3,7 @@ import { psInvoiceDetails } from "@cashu/cashu-ts/layer3";
 import { readFile } from "node:fs/promises";
 
 const mintUrl = "http://127.0.0.1:3339";
+const walletUrl = `http://127.0.0.1:${process.env.WALLET_E2E_PORT || "5173"}`;
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(
     (url) => localStorage.setItem("layer3-mint", url),
@@ -29,6 +30,30 @@ async function fund(page: Page, value: number) {
   await expect(page.getByTestId("balance")).toContainText(String(value));
   return hash;
 }
+
+test("shows the mint's two-week policy as a read-only setting", async ({
+  page,
+}) => {
+  await page.route("**/v1/info", async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      json: {
+        ...(await response.json()),
+        default_token_lifetime_blocks: 2016,
+        funding_htlc_cltv_delta: 2040,
+      },
+    });
+  });
+  await page.goto("/");
+  await expect(page.getByText("Mint connected", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(
+    page.getByText(/New tokens: 2,016 blocks \(about 14 days\)/),
+  ).toBeVisible();
+  await expect(page.getByText(/Set by the mint/)).toBeVisible();
+  await expect(page.getByRole("spinbutton")).toHaveCount(0);
+});
 
 test("fund, reload, send, receive in a second wallet, melt and expire residual change", async ({
   page,
@@ -65,7 +90,7 @@ test("fund, reload, send, receive in a second wallet, melt and expire residual c
     (url) => localStorage.setItem("layer3-mint", url),
     mintUrl,
   );
-  await bob.goto("http://127.0.0.1:5173");
+  await bob.goto(walletUrl);
   await expect(bob.getByText("Mint connected", { exact: true })).toBeVisible();
   await bob.getByRole("button", { name: "Receive", exact: true }).click();
   await bob.getByLabel("Ecash token").fill(token);
@@ -184,7 +209,7 @@ test("exports a real encrypted wallet backup and restores it in an empty browser
     (url) => localStorage.setItem("layer3-mint", url),
     mintUrl,
   );
-  await restored.goto("http://127.0.0.1:5173");
+  await restored.goto(walletUrl);
   await expect(
     restored.getByText("Mint connected", { exact: true }),
   ).toBeVisible();

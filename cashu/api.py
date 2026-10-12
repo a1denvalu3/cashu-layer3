@@ -73,6 +73,14 @@ def create_app(mint: Mint, recovery: bool = True) -> FastAPI:
 
     @app.get("/v1/info")
     async def info():
+        cltv_expiry = getattr(mint.backend, "cltv_expiry", 0)
+        token_lifetime = (
+            cltv_expiry
+            - getattr(mint.backend, "hold_expiry_delta", 0)
+            - mint.settle_margin_blocks
+            if cltv_expiry
+            else None
+        )
         return {
             "name": "Cashu Layer3",
             "unit": "sat",
@@ -87,6 +95,8 @@ def create_app(mint: Mint, recovery: bool = True) -> FastAPI:
             "pending_htlcs": "/v1/htlcs/pending",
             "settle_margin_blocks": mint.settle_margin_blocks,
             "settle_margin_seconds": mint.settle_margin_seconds,
+            "default_token_lifetime_blocks": token_lifetime,
+            "funding_htlc_cltv_delta": cltv_expiry or None,
         }
 
     @app.get("/v1/keys", response_model=KeysetResponse)

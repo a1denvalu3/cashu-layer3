@@ -28,6 +28,8 @@ async def test_lnd_hold_uses_supplied_hash_and_accepted_is_not_settled(tmp_path)
             body = json.loads(request.content)
             assert base64.b64decode(body["hash"]).hex() == payment_hash
             assert body["value"] == "1000"
+            assert body["expiry"] == "3600"  # Invoice payment window, in seconds.
+            assert body["cltv_expiry"] == "2040"  # Funding HTLC lifetime, in blocks.
             assert "preimage" not in body
             return httpx.Response(200, json={"payment_request": invoice.request})
         if request.url.path == f"/v1/invoice/{payment_hash}":
@@ -54,7 +56,10 @@ async def test_lnd_hold_uses_supplied_hash_and_accepted_is_not_settled(tmp_path)
     macaroon = tmp_path / "admin.macaroon"
     macaroon.write_bytes(b"test-only macaroon")
     backend = LndRestBackend(
-        "https://lnd.test", macaroon, transport=httpx.MockTransport(respond)
+        "https://lnd.test",
+        macaroon,
+        transport=httpx.MockTransport(respond),
+        cltv_expiry=2040,
     )
     created = await backend.create_hold_invoice(1000, payment_hash, 3600)
     assert created.state == InvoiceState.open

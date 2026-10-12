@@ -2,8 +2,12 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+from conftest import SEED
+from fastapi.testclient import TestClient
 
-from cashu.server import parse_args
+from cashu.api import create_app
+from cashu.mint import Mint
+from cashu.server import create_backend, parse_args
 
 
 @pytest.fixture(autouse=True)
@@ -19,6 +23,7 @@ def isolated_configuration(tmp_path, monkeypatch):
         "CASHU_LND_MACAROON",
         "CASHU_FEE_LIMIT_SAT",
         "CASHU_LND_HOLD_EXPIRY_DELTA",
+        "CASHU_LND_TOKEN_LIFETIME_BLOCKS",
         "CASHU_SETTLE_MARGIN_BLOCKS",
         "CASHU_SETTLE_MARGIN_SECONDS",
         "CASHU_SPARK_MNEMONIC",
@@ -40,6 +45,7 @@ def test_dotenv_selects_lnd_and_its_credentials(tmp_path):
         "CASHU_MINT_PORT=4338\n"
         "CASHU_FEE_LIMIT_SAT=20\n"
         "CASHU_LND_HOLD_EXPIRY_DELTA=30\n"
+        "CASHU_LND_TOKEN_LIFETIME_BLOCKS=1000\n"
     )
     args = parse_args([])
     assert args.backend == "lnd"
@@ -50,6 +56,7 @@ def test_dotenv_selects_lnd_and_its_credentials(tmp_path):
     assert args.port == 4338
     assert args.fee_limit_sat == 20
     assert args.lnd_hold_expiry_delta == 30
+    assert args.lnd_token_lifetime_blocks == 1000
 
 
 def test_cli_overrides_environment_which_overrides_dotenv(tmp_path, monkeypatch):
@@ -66,6 +73,57 @@ def test_cli_overrides_environment_which_overrides_dotenv(tmp_path, monkeypatch)
 
 
 @pytest.mark.parametrize(
+    "options,lifetime,cancellation,margin",
+    [
+        ([], 2016, 18, 6),
+        (["--lnd-token-lifetime-blocks", "1008"], 1008, 18, 6),
+        (
+            ["--lnd-hold-expiry-delta", "30", "--settle-margin-blocks", "12"],
+            2016,
+            30,
+            12,
+        ),
+        (["--lnd-token-lifetime-blocks", "65511"], 65511, 18, 6),
+    ],
+)
+def test_lnd_lifetime_includes_margins_and_is_advertised(
+    tmp_path, options, lifetime, cancellation, margin
+):
+    macaroon = tmp_path / "admin.macaroon"
+    macaroon.write_bytes(b"test-only macaroon")
+    args = parse_args(
+        [
+            "--backend",
+            "lnd",
+            "--lnd-endpoint",
+            "https://lnd.test",
+            "--lnd-macaroon",
+            str(macaroon),
+            *options,
+        ]
+    )
+    backend = create_backend(args)
+    assert backend.cltv_expiry == lifetime + cancellation + margin
+    assert backend.hold_expiry_delta == cancellation
+    mint = Mint(tmp_path / "mint.sqlite3", SEED, backend, args.settle_margin_blocks)
+    with TestClient(create_app(mint, recovery=False)) as http:
+        info = http.get("/v1/info").json()
+    assert info["default_token_lifetime_blocks"] == lifetime
+    assert info["funding_htlc_cltv_delta"] == lifetime + cancellation + margin
+    assert info["settle_margin_blocks"] == margin
+
+
+def test_time_based_backend_does_not_advertise_a_block_lifetime(tmp_path):
+    backend = create_backend(parse_args([]))
+    mint = Mint(tmp_path / "mint.sqlite3", SEED, backend)
+    with TestClient(create_app(mint, recovery=False)) as http:
+        info = http.get("/v1/info").json()
+    assert info["default_token_lifetime_blocks"] is None
+    assert info["funding_htlc_cltv_delta"] is None
+    assert info["settle_margin_seconds"] == 120
+
+
+@pytest.mark.parametrize(
     "configuration",
     [
         "CASHU_MINT_BACKEND=unsupported\n",
@@ -73,6 +131,9 @@ def test_cli_overrides_environment_which_overrides_dotenv(tmp_path, monkeypatch)
         "CASHU_MINT_PORT=invalid\n",
         "CASHU_FEE_LIMIT_SAT=-1\n",
         "CASHU_LND_HOLD_EXPIRY_DELTA=-1\n",
+        "CASHU_LND_TOKEN_LIFETIME_BLOCKS=0\n",
+        "CASHU_LND_TOKEN_LIFETIME_BLOCKS=-1\n",
+        "CASHU_LND_TOKEN_LIFETIME_BLOCKS=65535\n",
         "CASHU_SETTLE_MARGIN_BLOCKS=0\n",
         "CASHU_SETTLE_MARGIN_SECONDS=-1\n",
         "CASHU_MINT_BACKEND=spark\n",

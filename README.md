@@ -87,6 +87,7 @@ poetry run mint --backend lnd --data data/lnd-v3 \
   --lnd-macaroon /path/to/admin.macaroon \
   --fee-limit-sat 10 \
   --lnd-hold-expiry-delta 18 \
+  --lnd-token-lifetime-blocks 2016 \
   --settle-margin-blocks 6
 ```
 
@@ -94,6 +95,26 @@ TLS verification is enabled. The mint loads `.env` in the current directory;
 environment variables override the file and CLI arguments override both. Run
 one server process per database and retain its seed across restarts. The mint
 needs outgoing liquidity for payments while its incoming holds remain pending.
+
+New LND funding invoices request a redeemable lifetime of **2,016 blocks** by
+default, approximately two weeks at Bitcoin's average block interval. Configure
+it with `CASHU_LND_TOKEN_LIFETIME_BLOCKS` in `.env` or
+`--lnd-token-lifetime-blocks`. The mint adds the node cancellation delta and its
+settlement margin to the invoice's final-hop CLTV delta: defaults request
+2,040 blocks. The invoice's payment window remains separate (one hour by
+default). Existing HTLCs keep their original deadlines. Regtest blocks advance
+when mined, so this is a block lifetime rather than a two-week wall-clock timer.
+
+`GET /v1/info` exposes `default_token_lifetime_blocks` and
+`funding_htlc_cltv_delta`; the wallet shows the mint's policy in Settings.
+These fields are null for backends without a configured block lifetime.
+The accepted HTLC's observed deadline remains authoritative. The total requested
+CLTV delta cannot exceed 65,535 blocks. Payers and forwarding nodes must allow a
+route timelock longer than the final-hop delta. LND's default `max-cltv-expiry`
+is 2,016 blocks, too short for this policy; set `max-cltv-expiry=4096` in the
+payer's `lnd.conf`, restart that node, and use `payinvoice --cltv_limit 4096`.
+Some routes or wallets may refuse this longer hold. The mint does not shorten
+the requested lifetime to bypass those limits.
 
 `--lnd-hold-expiry-delta` must match the node's `invoices.holdexpirydelta`.
 LND can cancel accepted holds before their CLTV expiry. The redemption cutoff
@@ -106,7 +127,7 @@ runs every 5 seconds; it cannot settle through a node outage or while stopped.
 
 ### Local LND regtest with the web wallet
 
-Use the existing funded `~/cashu-regtest` network. `lnd-2` pays the backing hold,
+Use the existing funded `~/cashu-regtest` network. `lnd-1` pays the backing hold,
 `lnd-3` backs the mint through REST on port 8081, and `lnd-1` receives melts.
 To resume stopped nodes without resetting their data:
 
@@ -121,6 +142,16 @@ cashu-lightning-sync
 A fresh block lets LND report synced again after the regtest chain has been
 idle. Mining advances backing deadlines, so use one block for this check.
 
+The direct payer `lnd-1` needs this setting in
+`~/cashu-regtest/data/lnd-1/lnd.conf` (under `[Application Options]`):
+
+```ini
+max-cltv-expiry=4096
+```
+
+After adding it, run `docker compose -p cashu restart lnd-1` and wait for
+`lncli-sim 1 getinfo` to report synced. The current local payer is configured.
+
 The mint's `.env` should contain:
 
 ```dotenv
@@ -130,6 +161,7 @@ CASHU_LND_ENDPOINT=https://localhost:8081
 CASHU_LND_CERT=data/lnd-manual/tls.cert
 CASHU_LND_MACAROON=data/lnd-manual/admin.macaroon
 CASHU_LND_HOLD_EXPIRY_DELTA=18
+CASHU_LND_TOKEN_LIFETIME_BLOCKS=2016
 ```
 
 The local setup already has those credential files. If they are missing, copy
@@ -162,7 +194,7 @@ Pay it from the regtest payer:
 ```bash
 cd ~/cashu-regtest
 source ./docker-scripts.sh
-lncli-sim 2 payinvoice --force '<funding invoice>'
+lncli-sim 1 payinvoice --force --cltv_limit 4096 '<funding invoice>'
 ```
 
 This terminal remains pending while the HTLC is held. The web wallet credits
@@ -289,6 +321,12 @@ multiple HTLCs is processed as separate swaps, each with its own saved recovery
 operation. Payments may combine them. An unavailable or incomplete public
 backing snapshot fails the acceptance check. No hash-specific request reveals
 which HTLC the receiver is inspecting.
+
+Private swaps hide the backing hash from the mint, so the server does not check
+an individual HTLC's liveness during a swap. Wallets check before sending or
+receiving. Even a swap submitted after expiry preserves the original backing
+attribute; the mint rejects its outputs at redemption. Refreshing a signature
+cannot extend the HTLC's lifetime.
 
 Local `LIVE` state and an unrefreshed balance are not proof of current backing.
 `balance --refresh` marks unavailable claims `EXPIRED`; it never revives spent

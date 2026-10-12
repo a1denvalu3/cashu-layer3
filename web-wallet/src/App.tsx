@@ -879,6 +879,20 @@ export function App() {
                     ? `Keyset ${short(manager.wallet.keysetId)}`
                     : "Waiting for a mint connection"}
                 </div>
+                {manager?.wallet.defaultTokenLifetimeBlocks != null && (
+                  <p className="small muted">
+                    New tokens:{" "}
+                    {manager.wallet.defaultTokenLifetimeBlocks.toLocaleString()}{" "}
+                    blocks (about{" "}
+                    {(
+                      manager.wallet.defaultTokenLifetimeBlocks / 144
+                    ).toLocaleString(undefined, {
+                      maximumFractionDigits: 1,
+                    })}{" "}
+                    days). Set by the mint. Each funded HTLC has its own
+                    redemption deadline.
+                  </p>
+                )}
               </section>
               <section className="settings-card">
                 <h2>Keep a copy.</h2>
@@ -984,8 +998,8 @@ export function App() {
                   <span>sats</span>
                 </div>
                 <p className="small muted">
-                  Invoice expires in one hour. The funded HTLC’s deadline may be
-                  earlier.
+                  Pay this invoice within one hour. Funded tokens have a
+                  separate redemption deadline set by their backing HTLC.
                 </p>
                 <button
                   className="button dark full"

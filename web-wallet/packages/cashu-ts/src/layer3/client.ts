@@ -117,6 +117,8 @@ export class PSWallet {
   readonly mintUrl: string;
   keys: Record<number, PSPublicKey> = {};
   keysetId = "";
+  defaultTokenLifetimeBlocks: number | null = null;
+  fundingHtlcCltvDelta: number | null = null;
   constructor(
     mintUrl: string,
     private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis),
@@ -165,6 +167,20 @@ export class PSWallet {
         token_version: z.literal(3),
         swap_request_version: z.literal(3),
         swap: z.literal("same-htlc-many-to-many"),
+        default_token_lifetime_blocks: z
+          .number()
+          .int()
+          .positive()
+          .max(65535)
+          .nullable()
+          .optional(),
+        funding_htlc_cltv_delta: z
+          .number()
+          .int()
+          .positive()
+          .max(65535)
+          .nullable()
+          .optional(),
       })
       .passthrough()
       .parse(await this.request("/v1/info"));
@@ -180,6 +196,9 @@ export class PSWallet {
     if (denominationKeysetId(response.keys) !== response.id)
       throw new Error("Mint returned inconsistent keyset parameters");
     this.keysetId = response.id;
+    this.defaultTokenLifetimeBlocks =
+      info.default_token_lifetime_blocks ?? null;
+    this.fundingHtlcCltvDelta = info.funding_htlc_cltv_delta ?? null;
     this.keys = Object.fromEntries(
       Object.entries(response.keys).map(([n, raw]) => [
         Number(n),
