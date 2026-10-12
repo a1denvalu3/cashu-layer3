@@ -8,6 +8,7 @@ import pytest
 from cashu import cli
 from cashu.models import preimage_hash
 from cashu.token import decode_token, encode_token
+from cashu.wallet import Wallet
 
 
 def run(monkeypatch, service, path, *arguments):
@@ -67,3 +68,35 @@ def test_invalid_send_reports_actionable_error(service, monkeypatch, capsys):
         run(monkeypatch, service, path, "send", "10")
     assert exc.value.code == 1
     assert "one HTLC" in capsys.readouterr().err
+
+
+def test_receive_journals_all_backings_before_first_remote_spend(
+    service, monkeypatch, capsys
+):
+    from cashu.client import ClientError
+    from cashu.models import Token
+
+    first, _ = service.fund(32, os.urandom(32))
+    second, _ = service.fund(64, os.urandom(32))
+    incoming = Token(mint=first.mint, proofs=first.proofs + second.proofs)
+    path = service.path / "receiver.sqlite3"
+    finish = service.client.finish_swap
+
+    def lost_response(operation):
+        finish(operation)
+        raise ClientError("response lost")
+
+    monkeypatch.setattr(service.client, "finish_swap", lost_response)
+    with pytest.raises(SystemExit):
+        run(monkeypatch, service, path, "receive", encode_token(incoming))
+    capsys.readouterr()
+    wallet = Wallet(path)
+    assert len(wallet.pending()) == 2
+    assert (
+        sum(row["amount"] for row in wallet.tokens() if row["state"] == "PENDING") == 96
+    )
+    monkeypatch.setattr(service.client, "finish_swap", finish)
+    for operation in wallet.pending():
+        wallet.retry(service.client, operation["id"])
+    assert sum(row["amount"] for row in wallet.tokens() if row["state"] == "LIVE") == 96
+    assert wallet.pending() == []

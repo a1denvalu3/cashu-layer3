@@ -45,7 +45,23 @@ import { decryptBackup, encryptBackup } from "./backup";
 const repo = new Layer3IndexedDbRepository();
 const defaultMint =
   import.meta.env.VITE_DEFAULT_MINT || "http://127.0.0.1:3338";
-const initialMint = localStorage.getItem("layer3-mint") || defaultMint;
+const initialMint = (() => {
+  let saved: string | null = null;
+  try {
+    saved = localStorage.getItem("layer3-mint");
+  } catch {
+    /* A blocked storage preference must not prevent the wallet from opening. */
+  }
+  for (const candidate of [saved, defaultMint, "http://127.0.0.1:3338"]) {
+    if (!candidate) continue;
+    try {
+      return normalizePSMintUrl(candidate);
+    } catch {
+      /* Fall back from a malformed saved preference or build configuration. */
+    }
+  }
+  return "http://127.0.0.1:3338";
+})();
 const format = (n: number) => new Intl.NumberFormat("en-US").format(n);
 const short = (hash: string) => hash.slice(0, 8) + "…" + hash.slice(-6);
 type Dialog =
@@ -258,6 +274,10 @@ export function App() {
   const [tick, setTick] = useState(0),
     [reconnect, setReconnect] = useState(0);
   const busyRef = useRef(false);
+  const fundingRef = useRef<Layer3Funding | null>(null);
+  useEffect(() => {
+    fundingRef.current = funding;
+  }, [funding]);
 
   useEffect(() => {
     let active = true;
@@ -325,11 +345,22 @@ export function App() {
         for (const f of state.fundings.filter(
           (f) => f.mint === mintUrl && f.state === "waiting",
         )) {
-          const result = await manager.pollFunding(f.id);
-          if (active)
-            setFunding((current) =>
-              current?.id === result.id ? result : current,
-            );
+          try {
+            const result = await manager.pollFunding(f.id);
+            if (active) {
+              setFunding((current) =>
+                current?.id === result.id ? result : current,
+              );
+              if (dialog === "fund" && fundingRef.current?.id === result.id)
+                setError("");
+            }
+          } catch (err) {
+            // A broken older quote must not stop later deposits being claimed.
+            if (active && dialog === "fund" && fundingRef.current?.id === f.id)
+              setError(
+                err instanceof Error ? err.message : "Funding check failed",
+              );
+          }
         }
       } catch (err) {
         if (active && dialog === "fund")
@@ -681,6 +712,18 @@ export function App() {
                     <RefreshCw size={16} />
                   </button>
                 </div>
+                {!!view?.verified && view.expired > 0 && (
+                  <p
+                    className="small muted"
+                    role="status"
+                    data-testid="expired-balance"
+                  >
+                    Expired token records: {format(view.expired)} sats. Their
+                    backing settled or reached its deadline; these tokens are no
+                    longer spendable. Their records remain stored on this
+                    device.
+                  </p>
+                )}
                 {backedGroups.length ? (
                   <div className="backings-list">
                     {backedGroups.map((g) => {

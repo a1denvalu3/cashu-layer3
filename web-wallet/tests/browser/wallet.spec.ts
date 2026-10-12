@@ -5,10 +5,91 @@ import { readFile } from "node:fs/promises";
 const mintUrl = "http://127.0.0.1:3339";
 const walletUrl = `http://127.0.0.1:${process.env.WALLET_E2E_PORT || "5173"}`;
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript(
-    (url) => localStorage.setItem("layer3-mint", url),
+  await page.addInitScript((url) => {
+    if (!localStorage.getItem("layer3-mint"))
+      localStorage.setItem("layer3-mint", url);
+  }, mintUrl);
+});
+
+test("keeps balances and backings visible when the saved mint URL has a trailing slash", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.getByText("Mint connected", { exact: true })).toBeVisible();
+  await fund(page, 100);
+  await page.evaluate(
+    (url) => localStorage.setItem("layer3-mint", url + "/"),
     mintUrl,
   );
+  await page.reload();
+  await expect(page.getByTestId("balance")).toHaveText("100sats");
+  await expect(
+    page.getByRole("heading", { name: "Your backings 1" }),
+  ).toBeVisible();
+  await expect(page.getByText("Added ecash", { exact: true })).toBeVisible();
+});
+
+test("continues polling newer deposits when an older quote is unavailable", async ({
+  page,
+}) => {
+  const quotes: string[] = [];
+  await page.route(mintUrl + "/v1/mint/quote/bolt11", async (route) => {
+    const response = await route.fetch();
+    quotes.push((await response.json()).quote);
+    await route.fulfill({ response });
+  });
+  await page.goto("/");
+  await expect(page.getByText("Mint connected", { exact: true })).toBeVisible();
+  for (const value of [10, 100]) {
+    await page.getByRole("button", { name: "Add sats", exact: true }).click();
+    await page.getByLabel("Amount in sats").fill(String(value));
+    await page.getByRole("button", { name: "Create funding invoice" }).click();
+    await expect(page.getByLabel("Funding invoice")).toHaveValue(/^lnbcrt/);
+    const hash = psInvoiceDetails(
+      await page.getByLabel("Funding invoice").inputValue(),
+    ).paymentHash;
+    await page.getByRole("button", { name: "Close dialog" }).click();
+    if (value === 10)
+      await page.route(
+        mintUrl + "/v1/mint/quote/bolt11/" + quotes[0],
+        (route) =>
+          route.fulfill({
+            status: 503,
+            contentType: "application/json",
+            json: { detail: "This older quote is unavailable" },
+          }),
+      );
+    else
+      await page.request.post(mintUrl + "/test/accept", {
+        data: { payment_hash: hash },
+      });
+  }
+  await expect(page.getByTestId("balance")).toHaveText("100sats", {
+    timeout: 12000,
+  });
+  await expect(page.getByText("10 sats awaiting funding")).toBeVisible();
+});
+
+test("opens with a malformed saved preference and preserves funds when reconnecting", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.getByText("Mint connected", { exact: true })).toBeVisible();
+  await fund(page, 100);
+  await page.route("http://127.0.0.1:3338/**", (route) =>
+    route.abort("failed"),
+  );
+  await page.evaluate(() =>
+    localStorage.setItem("layer3-mint", "javascript:invalid-preference"),
+  );
+  await page.reload();
+  await expect(page.getByText("Mint offline", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByLabel("Mint URL").fill(mintUrl);
+  await page.getByRole("button", { name: "Save and connect" }).click();
+  await expect(page.getByText("Mint connected", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Wallet", exact: true }).click();
+  await expect(page.getByTestId("balance")).toHaveText("100sats");
 });
 async function fund(page: Page, value: number) {
   await page.getByRole("button", { name: "Add sats", exact: true }).click();
@@ -200,6 +281,9 @@ test("fund, reload, send, receive in a second wallet, melt and expire residual c
   });
   await bob.getByRole("button", { name: "Refresh backing status" }).click();
   await expect(bob.getByTestId("balance")).toHaveText("0sats");
+  await expect(bob.getByTestId("expired-balance")).toContainText(
+    "Expired token records: 1 sats",
+  );
   expect(errors).toEqual([]);
   await context.close();
 });

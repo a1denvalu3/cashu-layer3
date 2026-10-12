@@ -65,6 +65,12 @@ export interface Layer3Repository {
     operation: Layer3Operation,
     inputs: Layer3ProofRecord[],
   ): Promise<void>;
+  reserveMany(
+    entries: {
+      operation: Layer3Operation;
+      inputs: Layer3ProofRecord[];
+    }[],
+  ): Promise<void>;
   complete(
     operation: Layer3Operation,
     proofs: Layer3ProofRecord[],

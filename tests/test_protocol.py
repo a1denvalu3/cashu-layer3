@@ -4,13 +4,14 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from conftest import PREIMAGE
+from conftest import PREIMAGE, SEED
 
 from cashu.client import ClientError, fresh_secret, output
 from cashu.crypto.bls import PublicKey
 from cashu.crypto.ps import G1, present_private, prove_linear
+from cashu.db import MintError
 from cashu.keyset import common_h_statements, denominations
-from cashu.mint import COMMON_H_DST
+from cashu.mint import COMMON_H_DST, Mint
 from cashu.models import (
     BlindOutput,
     InvoiceState,
@@ -96,6 +97,55 @@ def test_issuance_conserves_funded_amount_and_retries_exactly(service):
     conflicting = service.client.prepare_mint(quote.quote, PREIMAGE.hex())
     with pytest.raises(ClientError, match="409"):
         service.client.finish_mint(conflicting)
+
+
+@pytest.mark.parametrize("same_request", [False, True])
+def test_concurrent_mint_instances_issue_one_durable_receipt(
+    service, monkeypatch, same_request
+):
+    quote = service.client.quote(16, hashlib.sha256(PREIMAGE).hexdigest())
+    asyncio.run(service.backend.accept(quote.payment_hash))
+    first = service.client.prepare_mint(quote.quote, PREIMAGE.hex())
+    second = (
+        first
+        if same_request
+        else service.client.prepare_mint(quote.quote, PREIMAGE.hex())
+    )
+    other = Mint(service.path / "mint.sqlite3", SEED, service.backend)
+
+    async def race():
+        arrived = 0
+        barrier = asyncio.Event()
+        original = service.mint._live_invoice
+
+        async def live(row):
+            nonlocal arrived
+            result = await original(row)
+            arrived += 1
+            if arrived == 2:
+                barrier.set()
+            await barrier.wait()
+            return result
+
+        monkeypatch.setattr(service.mint, "_live_invoice", live)
+        monkeypatch.setattr(other, "_live_invoice", live)
+        return await asyncio.gather(
+            service.mint.mint(first.request),
+            other.mint(second.request),
+            return_exceptions=True,
+        )
+
+    results = asyncio.run(race())
+    if same_request:
+        assert results[0] == results[1]
+    else:
+        assert sum(isinstance(result, MintError) for result in results) == 1
+        failed = next(result for result in results if isinstance(result, MintError))
+        assert failed.status_code == 409
+    winner = first if not isinstance(results[0], MintError) else second
+    token = service.client.finish_mint(winner)
+    assert token.amount == 16
+    assert service.client.finish_mint(winner) == token
 
 
 def test_swap_rejects_unbalanced_and_duplicate_inputs_without_spending(service):
@@ -265,7 +315,7 @@ def test_same_invoice_cannot_pay_twice_with_different_backing(service):
     first = service.client.prepare_melt(a, invoice, fee_reserve=0)
     second = service.client.prepare_melt(b, invoice, fee_reserve=0)
     service.client.finish_melt(first)
-    with pytest.raises(ClientError, match="409"):
+    with pytest.raises(ClientError, match="already paid"):
         service.client.finish_melt(second)
     assert service.client.check(
         [service.client.nullifier(p) for p in b.proofs]

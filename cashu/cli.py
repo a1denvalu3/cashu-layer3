@@ -9,7 +9,7 @@ from pathlib import Path
 
 import httpx
 
-from .client import Client, ClientError
+from .client import Client, ClientError, SwapOperation
 from .lightning import FakeBackend
 from .models import InvoiceState, QuoteResponse, Token, TokenProof, preimage_hash
 from .token import decode_token
@@ -238,16 +238,17 @@ def main() -> None:
             groups: dict[str, list[TokenProof]] = {}
             for proof in incoming.proofs:
                 groups.setdefault(proof.payment_hash, []).append(proof)
+            operations: list[SwapOperation] = [
+                client.prepare_swap(Token(mint=incoming.mint, proofs=proofs))
+                for proofs in groups.values()
+            ]
+            wallet.save_many(list(operations))
             received_proofs = []
-            for proofs in groups.values():
-                operation = client.prepare_swap(
-                    Token(mint=incoming.mint, proofs=proofs)
-                )
+            for operation in operations:
                 print(
                     f"Backing deadline: {operation.backing.model_dump_json()}",
                     file=sys.stderr,
                 )
-                wallet.save(operation)
                 print(
                     f"Saved swap operation {operation.id}", file=sys.stderr, flush=True
                 )

@@ -167,7 +167,7 @@ def test_definite_failure_releases_all_inputs_but_retains_known_preimage(service
     wallet.save(operation)
     with pytest.raises(ClientError, match="failed"):
         wallet.retry(service.client, operation.id)
-    wallet.abandon(service.client, operation.id)
+    assert wallet.pending() == []
     assert all(r["state"] == "LIVE" for r in wallet.tokens())
     with service.mint.db.read() as conn:
         row = conn.execute("SELECT preimage,redeemed,reserved FROM quotes").fetchone()

@@ -60,6 +60,30 @@ def test_snapshot_exposes_deadline_and_backing_but_no_secrets(service):
     assert service.client.check_backing(token)[0] == entry
 
 
+@pytest.mark.parametrize("incomplete", ["open", "underpaid"])
+def test_issued_backing_reported_incomplete_fails_closed_instead_of_disappearing(
+    service, monkeypatch, incomplete
+):
+    token, _ = service.fund(16)
+    original = service.backend.get_invoice
+
+    async def stale_invoice(payment_hash):
+        invoice = await original(payment_hash)
+        return (
+            replace(invoice, state=InvoiceState.open)
+            if incomplete == "open"
+            else replace(invoice, amount_paid=invoice.amount - 1)
+        )
+
+    monkeypatch.setattr(service.backend, "get_invoice", stale_invoice)
+    response = service.client.http.get("/v1/htlcs/pending")
+    assert response.status_code == 503
+    assert "unavailable" in response.json()["detail"]
+    assert service.client.check(
+        [service.client.nullifier(p) for p in token.proofs]
+    ).states == ["UNSPENT"]
+
+
 @pytest.mark.parametrize("terminal", ["canceled", "expired", "settled"])
 def test_terminal_backing_invalidates_remaining_fragments(
     service, terminal, monkeypatch
@@ -89,7 +113,7 @@ def test_terminal_backing_invalidates_remaining_fragments(
         "/v1/melt/bolt11", json=melt.request.model_dump()
     )
     assert response.status_code == 409
-    assert "not fully accepted" in response.json()["detail"]
+    assert "closed" in response.json()["detail"]
     assert service.client.check(
         [service.client.nullifier(p) for p in token.proofs]
     ).states == ["UNSPENT"]

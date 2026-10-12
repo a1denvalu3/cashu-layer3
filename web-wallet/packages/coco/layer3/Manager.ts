@@ -34,6 +34,7 @@ export class Layer3Manager {
   private verifiedAt = 0;
   private verifiedProofs = new Set<string>();
   private queue: Promise<unknown> = Promise.resolve();
+  private refreshTask: Promise<void> | null = null;
   constructor(
     readonly repo: Layer3Repository,
     mintUrl: string,
@@ -92,8 +93,14 @@ export class Layer3Manager {
       return false;
     }
   }
-  async refresh(): Promise<void> {
-    return this.exclusive(() => this.refreshUnlocked());
+  refresh(): Promise<void> {
+    if (this.refreshTask) return this.refreshTask;
+    this.refreshTask = this.exclusive(() => this.refreshUnlocked()).finally(
+      () => {
+        this.refreshTask = null;
+      },
+    );
+    return this.refreshTask;
   }
   private async refreshUnlocked(): Promise<void> {
     try {
@@ -243,9 +250,16 @@ export class Layer3Manager {
       if (funding.state !== "waiting") return funding;
       const pending = state.operations.find(
         (o) =>
+          o.mint === this.wallet.mintUrl &&
           o.payload.kind === "mint" &&
           o.payload.quote.payment_hash === funding.id,
       );
+      if (pending) {
+        // The mint may already have issued this exact request before its HTLC
+        // closed. Recover its receipt instead of discarding the issuance journal.
+        await this.execute(pending);
+        return (await this.repo.read()).fundings.find((f) => f.id === id)!;
+      }
       funding.quote = funding.quote
         ? await this.wallet.getMintQuote(funding.quote.quote)
         : await this.wallet.createMintQuote(
@@ -263,8 +277,7 @@ export class Layer3Manager {
         return funding;
       }
       await this.repo.updateFunding(funding);
-      if (pending) await this.execute(pending);
-      else if (funding.quote.state === "ACCEPTED") {
+      if (funding.quote.state === "ACCEPTED") {
         const op = this.operation(
           this.wallet.prepareMint(funding.quote, funding.preimage),
           "mint",
@@ -326,6 +339,19 @@ export class Layer3Manager {
   async receive(encoded: string): Promise<number> {
     return this.exclusive(async () => {
       const token = this.wallet.verifyToken(decodePSToken(encoded));
+      const incoming = new Set(token.proofs.map(psNullifier));
+      if (
+        (await this.repo.read()).operations.some(
+          (op) =>
+            op.mint === this.wallet.mintUrl &&
+            op.purpose === "receive" &&
+            op.payload.kind === "swap" &&
+            op.payload.token.proofs.some((p) => incoming.has(psNullifier(p))),
+        )
+      )
+        throw new Error(
+          "This token has saved receive operations. Close this dialog and retry them under Pending operations.",
+        );
       const groups = new Map<string, PSProof[]>();
       token.proofs.forEach((p) =>
         groups.set(p.payment_hash, [...(groups.get(p.payment_hash) ?? []), p]),
@@ -336,6 +362,7 @@ export class Layer3Manager {
         if (states.some((s) => s !== "UNSPENT"))
           throw new Error("Token is already spent or has a pending operation");
       }
+      const operations: Layer3Operation[] = [];
       for (const proofs of groups.values()) {
         const source = this.token(proofs),
           op = this.operation(
@@ -343,9 +370,21 @@ export class Layer3Manager {
             "receive",
             psTokenAmount(source),
           );
-        await this.save(op);
-        await this.execute(op);
+        operations.push(op);
       }
+      // Preserve every incoming backing before spending any of them. A lost
+      // first response must leave later groups recoverable after a reload.
+      await this.repo.reserveMany(
+        operations.map((operation) => ({
+          operation,
+          inputs:
+            operation.payload.kind === "swap"
+              ? operation.payload.token.proofs.map((p) => this.record(p))
+              : [],
+        })),
+      );
+      await this.changed();
+      for (const op of operations) await this.execute(op);
       await this.refreshUnlocked();
       return psTokenAmount(token);
     });
@@ -474,16 +513,22 @@ export class Layer3Manager {
         error.status === 409 &&
         [
           "melt payment failed; tokens are unspent",
+          "melt quote has expired",
+          "backing HTLC is closed; its tokens have expired",
+          "backing HTLC redemption deadline has passed",
           "melt quote already belongs to another request",
-          "payout invoice is already reserved or paid",
+          "payout invoice is already paid",
         ].includes(error.message)
       ) {
         try {
           const states = await this.wallet.checkProofs(op.payload.token.proofs);
-          if (states.every((state) => state === "UNSPENT"))
+          if (states.every((state) => state === "UNSPENT")) {
             await this.repo.release(op);
+            await this.refreshUnlocked();
+          }
         } catch {
-          // Keep reservations when the authoritative proof check is unavailable.
+          // Failed proof checks keep reservations. A failed backing refresh
+          // after release leaves the stored inputs unverified until reconnection.
         }
       }
       await this.changed();

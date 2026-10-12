@@ -115,7 +115,12 @@ class MeltOperation(WireModel):
 
 
 class ClientError(Exception):
-    pass
+    def __init__(
+        self, message: str, status_code: int | None = None, detail: str | None = None
+    ):
+        super().__init__(message)
+        self.status_code = status_code
+        self.detail = detail
 
 
 def fresh_secret() -> int:
@@ -141,8 +146,14 @@ class Client:
     @staticmethod
     def _response(response: httpx.Response) -> str:
         if response.status_code != 200:
+            try:
+                detail = response.json().get("detail")
+            except (ValueError, AttributeError):
+                detail = None
             raise ClientError(
-                f"mint returned HTTP {response.status_code}: {response.text}"
+                f"mint returned HTTP {response.status_code}: {response.text}",
+                status_code=response.status_code,
+                detail=detail if isinstance(detail, str) else None,
             )
         return response.text
 

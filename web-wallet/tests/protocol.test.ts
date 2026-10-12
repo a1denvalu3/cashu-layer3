@@ -214,6 +214,139 @@ describe("Python mint ↔ browser cashu-ts protocol", () => {
 });
 
 describe("Coco operation journal and IndexedDB", () => {
+  it("journals every backing of a combined receive before its first swap", async () => {
+    const first = await mint(32),
+      second = await mint(64),
+      combined: PSToken = {
+        version: 3,
+        mint: mintUrl,
+        proofs: [...first.proofs, ...second.proofs],
+      },
+      repo = repository();
+    let dropped = false;
+    const requests: string[] = [];
+    const manager = new Layer3Manager(repo, mintUrl, async (input, init) => {
+      const response = await fetch(input, init);
+      if (String(input).endsWith("/v1/swap")) {
+        requests.push(String(init?.body));
+        if (!dropped) {
+          dropped = true;
+          throw new TypeError("Lost first combined-receive response");
+        }
+      }
+      return response;
+    });
+    await manager.init();
+    await expect(manager.receive(encodePSToken(combined))).rejects.toThrow(
+      "Lost first",
+    );
+    const saved = await repo.read();
+    expect(saved.operations).toHaveLength(2);
+    expect(saved.proofs.reduce((sum, p) => sum + p.proof.amount, 0)).toBe(96);
+    expect(saved.proofs.every((p) => p.state === "reserved")).toBe(true);
+    await expect(manager.receive(encodePSToken(combined))).rejects.toThrow(
+      "retry them under Pending operations",
+    );
+    const restarted = new Layer3Manager(repo, mintUrl);
+    await restarted.init();
+    for (const op of saved.operations) await restarted.retry(op.id);
+    expect((await restarted.view()).balance).toBe(96);
+    expect((await repo.read()).operations).toEqual([]);
+  });
+  it("recovers a saved issuance receipt even after the funding quote closes", async () => {
+    const repo = repository();
+    let dropped = false;
+    const manager = new Layer3Manager(repo, mintUrl, async (input, init) => {
+      const response = await fetch(input, init);
+      if (String(input).endsWith("/v1/mint/bolt11") && !dropped) {
+        dropped = true;
+        throw new TypeError("Lost issuance receipt");
+      }
+      return response;
+    });
+    await manager.init();
+    const funding = await manager.createFunding(100);
+    await control("accept", { payment_hash: funding.id });
+    await expect(manager.pollFunding(funding.id)).rejects.toThrow("Lost");
+    await control("settle", { payment_hash: funding.id });
+    const restarted = new Layer3Manager(repo, mintUrl);
+    await restarted.init();
+    expect((await restarted.pollFunding(funding.id)).state).toBe("minted");
+    expect((await repo.read()).operations).toEqual([]);
+    expect((await repo.read()).activity).toHaveLength(1);
+    expect((await restarted.view()).balance).toBe(0);
+    expect((await restarted.view()).expired).toBe(100);
+  });
+  it("rolls back the entire receive batch if a later group is already reserved", async () => {
+    const repo = repository(),
+      first = await mint(32),
+      second = await mint(64);
+    const entries = [];
+    for (const token of [first, second]) {
+      const payload = await wallet.prepareSwap(token);
+      entries.push({
+        operation: {
+          id: payload.id,
+          mint: mintUrl,
+          payload,
+          purpose: "receive" as const,
+          sendCount: 0,
+          amount: psTokenAmount(token),
+          createdAt: Date.now(),
+          error: null,
+        },
+        inputs: token.proofs.map((proof) => ({
+          id: psNullifier(proof),
+          mint: mintUrl,
+          proof,
+          state: "ready" as const,
+          operationId: null,
+          createdAt: Date.now(),
+        })),
+      });
+    }
+    await repo.reserve(entries[1].operation, entries[1].inputs);
+    await expect(repo.reserveMany(entries)).rejects.toThrow("already exists");
+    expect((await repo.read()).operations.map((op) => op.id)).toEqual([
+      entries[1].operation.id,
+    ]);
+    expect((await repo.read()).proofs.map((p) => p.id)).toEqual(
+      entries[1].inputs.map((p) => p.id),
+    );
+    expect(await wallet.checkProofs(first.proofs)).toEqual(["UNSPENT"]);
+  });
+  it("coalesces slow background refreshes so they cannot crowd out spending", async () => {
+    const repo = repository();
+    let slow = false,
+      snapshots = 0;
+    let started!: () => void, resume!: () => void;
+    const pending = new Promise<void>((resolve) => (started = resolve));
+    const released = new Promise<void>((resolve) => (resume = resolve));
+    const manager = new Layer3Manager(repo, mintUrl, async (input, init) => {
+      if (slow && String(input).endsWith("/v1/htlcs/pending")) {
+        snapshots++;
+        if (snapshots === 1) {
+          started();
+          await released;
+        }
+      }
+      return fetch(input, init);
+    });
+    await manager.init();
+    const funding = await manager.createFunding(100);
+    await control("accept", { payment_hash: funding.id });
+    await manager.pollFunding(funding.id);
+    slow = true;
+    const refreshing = manager.refresh();
+    await pending;
+    const repeated = Array.from({ length: 12 }, () => manager.refresh());
+    const sending = manager.send(10);
+    resume();
+    await Promise.all([refreshing, ...repeated, sending]);
+    // One shared background read, plus send verification, swap preparation and final refresh.
+    expect(snapshots).toBe(4);
+    expect((await manager.view()).balance).toBe(90);
+  });
   it("queues background refreshes while a deposit is being minted", async () => {
     const repo = repository();
     let snapshots = 0;
@@ -592,6 +725,50 @@ describe("Coco operation journal and IndexedDB", () => {
     expect((await manager.melt(quote)).amount).toBe(10);
     expect((await manager.view()).balance).toBe(88);
   });
+  it("releases an expired melt quote after verifying its inputs remain unspent", async () => {
+    const repo = repository(),
+      manager = new Layer3Manager(repo, mintUrl);
+    await manager.init();
+    const funding = await manager.createFunding(100);
+    await control("accept", { payment_hash: funding.id });
+    await manager.pollFunding(funding.id);
+    const { request } = await control("receiver", { amount: 10 });
+    const quote = await manager.meltQuote(request, 2);
+    await control("expire-melt-quote", { quote: quote.quote });
+    await expect(manager.melt(quote)).rejects.toThrow("melt quote has expired");
+    expect((await repo.read()).operations).toEqual([]);
+    expect((await manager.view()).reserved).toBe(0);
+    expect((await manager.view()).balance).toBe(100);
+    const fresh = await manager.meltQuote(request, 2);
+    expect((await manager.melt(fresh)).amount).toBe(10);
+    expect((await manager.view()).balance).toBe(88);
+  });
+  it("releases live inputs when another backing closes just before a combined melt", async () => {
+    const repo = repository();
+    let closedHash = "";
+    const manager = new Layer3Manager(repo, mintUrl, async (input, init) => {
+      if (closedHash && String(input).endsWith("/v1/melt/bolt11")) {
+        await control("settle", { payment_hash: closedHash });
+        closedHash = "";
+      }
+      return fetch(input, init);
+    });
+    await manager.init();
+    const expired = await manager.createFunding(32),
+      live = await manager.createFunding(64);
+    for (const funding of [expired, live]) {
+      await control("accept", { payment_hash: funding.id });
+      await manager.pollFunding(funding.id);
+    }
+    const { request } = await control("receiver", { amount: 80 });
+    const quote = await manager.meltQuote(request, 2);
+    closedHash = expired.id;
+    await expect(manager.melt(quote)).rejects.toThrow(/backing HTLC/);
+    expect((await repo.read()).operations).toEqual([]);
+    expect((await manager.view()).reserved).toBe(0);
+    expect((await manager.view()).balance).toBe(64);
+    expect((await manager.view()).expired).toBe(32);
+  });
   it("keeps a rejected melt reserved when the proof-state check is unavailable", async () => {
     const repo = repository();
     let rejected = false;
@@ -617,6 +794,84 @@ describe("Coco operation journal and IndexedDB", () => {
     await expect(manager.melt(quote)).rejects.toThrow("tokens are unspent");
     expect((await repo.read()).operations).toHaveLength(1);
     expect((await manager.view()).reserved).toBe(64);
+  });
+  it("keeps legacy acceptance errors reserved because their backing may become live again", async () => {
+    const repo = repository();
+    const manager = new Layer3Manager(repo, mintUrl, async (input, init) => {
+      if (String(input).endsWith("/v1/melt/bolt11"))
+        return new Response(
+          JSON.stringify({
+            detail:
+              "backing HTLC is not fully accepted; its tokens are unavailable",
+          }),
+          { status: 409, headers: { "Content-Type": "application/json" } },
+        );
+      return fetch(input, init);
+    });
+    await manager.init();
+    const funding = await manager.createFunding(100);
+    await control("accept", { payment_hash: funding.id });
+    await manager.pollFunding(funding.id);
+    const { request } = await control("receiver", { amount: 10 });
+    await expect(
+      manager.melt(await manager.meltQuote(request, 2)),
+    ).rejects.toThrow("not fully accepted");
+    expect((await repo.read()).operations).toHaveLength(1);
+    expect((await manager.view()).reserved).toBe(64);
+  });
+  it("preserves a payout collision request that can become eligible after another quote fails", async () => {
+    const repo = repository(),
+      manager = new Layer3Manager(repo, mintUrl);
+    await manager.init();
+    const funding = await manager.createFunding(100);
+    await control("accept", { payment_hash: funding.id });
+    await manager.pollFunding(funding.id);
+    const { request } = await control("receiver", { amount: 10 });
+    const otherQuote = await wallet.createMeltQuote(request, 2),
+      other = await wallet.prepareMelt(await mint(32), otherQuote);
+    await control("payment-state", {
+      payment_hash: otherQuote.payment_hash,
+      state: "IN_FLIGHT",
+    });
+    await expect(wallet.finishMelt(other)).rejects.toThrow("pending");
+    const quote = await manager.meltQuote(request, 2);
+    await expect(manager.melt(quote)).rejects.toThrow(
+      "payout invoice is already reserved or paid",
+    );
+    const saved = (await repo.read()).operations[0];
+    expect(saved).toBeDefined();
+    expect((await manager.view()).reserved).toBe(64);
+    await control("payment-state", {
+      payment_hash: quote.payment_hash,
+      state: "FAILED",
+    });
+    await expect(wallet.finishMelt(other)).rejects.toThrow("payment failed");
+    await control("payment-state", {
+      payment_hash: quote.payment_hash,
+      state: null,
+    });
+    expect((await manager.retry(saved.id)).receipt?.amount).toBe(10);
+    expect((await manager.view()).balance).toBe(88);
+    expect((await repo.read()).operations).toEqual([]);
+  });
+  it("releases unspent inputs when another quote has already paid the invoice", async () => {
+    const repo = repository(),
+      manager = new Layer3Manager(repo, mintUrl);
+    await manager.init();
+    const funding = await manager.createFunding(100);
+    await control("accept", { payment_hash: funding.id });
+    await manager.pollFunding(funding.id);
+    const { request } = await control("receiver", { amount: 10 });
+    const otherQuote = await wallet.createMeltQuote(request, 2);
+    await wallet.finishMelt(
+      await wallet.prepareMelt(await mint(32), otherQuote),
+    );
+    await expect(
+      manager.melt(await manager.meltQuote(request, 2)),
+    ).rejects.toThrow("payout invoice is already paid");
+    expect((await repo.read()).operations).toEqual([]);
+    expect((await manager.view()).reserved).toBe(0);
+    expect((await manager.view()).balance).toBe(100);
   });
   it("recovers an old duplicate melt without releasing the original reservation", async () => {
     const repo = repository();

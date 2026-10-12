@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from typing import Literal
 
 import uvicorn
 from pydantic import BaseModel
@@ -22,6 +23,15 @@ class Funding(BaseModel):
 
 class Receiver(BaseModel):
     amount: int
+
+
+class Quote(BaseModel):
+    quote: str
+
+
+class PaymentControl(BaseModel):
+    payment_hash: str
+    state: Literal["IN_FLIGHT", "FAILED"] | None
 
 
 def main():
@@ -56,6 +66,31 @@ def main():
         @app.post("/test/receiver")
         async def receiver(request: Receiver):
             return {"request": backend.receiver_invoice(request.amount, os.urandom(32))}
+
+        @app.post("/test/expire-melt-quote")
+        async def expire_melt_quote(request: Quote):
+            quote = mint._melt_quote(request.quote).model_copy(update={"expiry": 0})
+            with mint.db.transaction() as conn:
+                conn.execute(
+                    "UPDATE melt_quotes SET payload=? WHERE quote=?",
+                    (quote.model_dump_json(), quote.quote),
+                )
+            return {"expired": True}
+
+        @app.post("/test/payment-state")
+        async def payment_state(request: PaymentControl):
+            with backend.db.transaction() as conn:
+                if request.state is None:
+                    conn.execute(
+                        "DELETE FROM payments WHERE payment_hash=?",
+                        (request.payment_hash,),
+                    )
+                else:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO payments VALUES (?,?,NULL,0)",
+                        (request.payment_hash, request.state),
+                    )
+            return {"updated": True}
 
         uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="error")
 

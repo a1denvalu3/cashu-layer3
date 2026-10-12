@@ -110,6 +110,11 @@ class SparkBackend(HoldInvoiceBackend):
                 "amount INTEGER NOT NULL, request TEXT NOT NULL, expiry INTEGER NOT NULL, "
                 "state TEXT NOT NULL DEFAULT 'OPEN')"
             )
+            columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(invoices)")
+            }
+            if "hold_expires_at" not in columns:
+                conn.execute("ALTER TABLE invoices ADD COLUMN hold_expires_at INTEGER")
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS payments (payment_hash TEXT PRIMARY KEY, "
                 "request TEXT NOT NULL, fee_limit_sat INTEGER NOT NULL, "
@@ -290,15 +295,24 @@ class SparkBackend(HoldInvoiceBackend):
         self._validate_cltv(decode(row["request"]).min_final_cltv_expiry)
         state = InvoiceState(row["state"])
         amount_paid = 0
-        deadline = None
+        deadline = row["hold_expires_at"]
         if state not in {InvoiceState.settled, InvoiceState.canceled}:
             payment = await self._find_payment(payment_hash, breez.PaymentType.RECEIVE)
             if payment is None:
-                state = (
-                    InvoiceState.canceled
-                    if row["expiry"] <= int(time.time())
-                    else InvoiceState.open
-                )
+                if state == InvoiceState.accepted:
+                    if deadline is None or deadline > int(time.time()):
+                        raise BackendError(
+                            "Spark accepted backing lookup unavailable; retry to reconcile"
+                        )
+                    state = InvoiceState.canceled
+                elif row["expiry"] <= int(time.time()):
+                    # The unpaid invoice's expiry cannot prove that a funded
+                    # HTLC expired. The SDK may temporarily omit that receive.
+                    raise BackendError(
+                        "Spark funding state unavailable; retry to reconcile"
+                    )
+                else:
+                    state = InvoiceState.open
             else:
                 details = payment.details
                 if not isinstance(details, breez.PaymentDetails.LIGHTNING):
@@ -334,11 +348,28 @@ class SparkBackend(HoldInvoiceBackend):
                     )
                 else:
                     raise BackendError("Spark returned an unknown backing state")
-            if state in {InvoiceState.settled, InvoiceState.canceled}:
-                with self.db.transaction() as conn:
+            with self.db.transaction() as conn:
+                current = conn.execute(
+                    "SELECT state,hold_expires_at FROM invoices WHERE payment_hash=?",
+                    (payment_hash,),
+                ).fetchone()
+                current_state = InvoiceState(current["state"])
+                if current_state in {InvoiceState.settled, InvoiceState.canceled}:
+                    # A concurrent lookup may have confirmed closure while this
+                    # lookup was awaiting an older SDK snapshot.
+                    state = current_state
+                    deadline = current["hold_expires_at"]
+                elif (
+                    state == InvoiceState.open
+                    and current_state == InvoiceState.accepted
+                ):
+                    raise BackendError(
+                        "Spark accepted backing lookup unavailable; retry to reconcile"
+                    )
+                elif state != InvoiceState.open:
                     conn.execute(
-                        "UPDATE invoices SET state=? WHERE payment_hash=?",
-                        (state.value, payment_hash),
+                        "UPDATE invoices SET state=?,hold_expires_at=? WHERE payment_hash=?",
+                        (state.value, deadline, payment_hash),
                     )
         return Invoice(
             payment_hash=payment_hash,

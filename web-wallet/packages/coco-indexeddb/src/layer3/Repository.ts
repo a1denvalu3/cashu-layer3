@@ -94,6 +94,17 @@ export class Layer3IndexedDbRepository
       await this.operations.add(op);
     });
   }
+  async reserveMany(
+    entries: {
+      operation: Layer3Operation;
+      inputs: Layer3ProofRecord[];
+    }[],
+  ): Promise<void> {
+    await this.runTransaction("rw", ["operations", "proofs"], async () => {
+      for (const entry of entries)
+        await this.reserve(entry.operation, entry.inputs);
+    });
+  }
   async complete(
     op: Layer3Operation,
     proofs: Layer3ProofRecord[],

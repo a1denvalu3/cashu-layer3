@@ -45,7 +45,9 @@ over HTTPS and use an HTTPS mint; browsers block mixed-content requests.
   travels with the token. Sent proofs are excluded from the balance.
 - **Receive:** checks the signature, mint, backing, deadline, and nullifiers,
   then swaps into fresh owner secrets. Mixed bundles are refreshed with a
-  separate swap per backing. Tokens from another mint require explicitly
+  separate swap per backing. All backing proofs and prepared requests are saved
+  together before the first swap, so every part remains recoverable if a response
+  is lost or the tab closes. Tokens from another mint require explicitly
   connecting to that mint first. A backing without a preimage offers an
   **Add backing preimage** action.
 - **Pay with Lightning:** verifies the signed BOLT11 invoice, shows its amount
@@ -68,6 +70,10 @@ a snapshot taken before issuance cannot expire the newly stored outputs. Reloadi
 also rechecks proofs previously marked expired: a live backing, valid credential,
 and an unspent nullifier are required before restoring spendable value. Outgoing
 tokens stay excluded from the balance, and closed backing stays unusable.
+Slow background refreshes share one pending request instead of filling the
+operation queue. Funding polling continues with other deposits if one quote
+cannot be checked, and saved issuance requests replay even after backing closes.
+That replay recovers records; it does not make genuinely expired tokens spendable.
 
 Operations save secrets and the **exact request before any spending POST**.
 Retries after a timeout or reload replay that request. Paying the same invoice

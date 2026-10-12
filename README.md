@@ -298,6 +298,11 @@ a lost response it checks all pages of SDK payment history and reuses the same
 UUID and fee cap if the payment is not yet cached. Uncertain outcomes keep
 inputs reserved; a completed payment without its preimage remains pending.
 
+Accepted incoming holds and their funded deadlines are persisted. A temporarily
+missing SDK receive record produces an unavailable-status error, rather than an
+empty backing list or cancellation at the unpaid invoice's expiry. Confirmed
+settlement, return, or funded-contract expiry remains terminal.
+
 The pinned Breez SDK supports `mainnet` and `regtest`. Private regtest requires
 `--spark-network regtest --spark-config-file /path/to/spark-regtest.json`.
 The JSON supplies `coordinator_identifier`, `threshold`, `signing_operators`
@@ -355,7 +360,11 @@ prints a bearer bundle without spending it. Fake development helpers are
 
 A send requires one HTLC with enough value. A received bundle containing
 multiple HTLCs is processed as separate swaps, each with its own saved recovery
-operation. Payments may combine them. An unavailable or incomplete public
+operation. All receive requests and input proofs are saved atomically before
+the first swap is submitted, so interruption cannot discard later backings.
+An interrupted split send also retains its requested amount; retry marks exactly
+those outgoing proofs `SENT` while keeping change available. Payments may combine
+backings. An unavailable or incomplete public
 backing snapshot fails the acceptance check. No hash-specific request reveals
 which HTLC the receiver is inspecting.
 
@@ -398,8 +407,12 @@ again. Exact retries return the original signatures and receipt.
 A definite payout failure releases all inputs and is retained as a terminal
 failure for that quote. Replaying that request never starts another payment;
 a new quote is required to authorize another attempt. An uncertain or pending
-payout keeps its inputs reserved. Wallet abandonment requires **every** input
-to be unspent.
+payout keeps its inputs reserved. Python wallet abandonment requires **every**
+input to be unspent and the saved operation to be unsubmitted. Once a request
+may have reached the mint, retry preserves its recovery secrets. Releasing an
+unsubmitted operation preserves each input's original `LIVE` or `SENT` state.
+Definite failed melt requests can release their inputs after all are checked
+unspent, because the mint retains the terminal failure for that exact request.
 Failure cannot make a disclosed preimage unknown again: the mint retains it for
 scheduled settlement. A paid melt receipt says `PAID`, regardless of whether
 its backing HTLCs remain held or have subsequently closed.

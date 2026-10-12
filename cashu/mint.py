@@ -198,6 +198,19 @@ class Mint:
             raise MintError("backing HTLC is closed; its tokens have expired", 409)
         invoice = await self.backend.get_invoice(row["payment_hash"])
         self._validate_invoice(invoice, row["payment_hash"], row["amount"])
+        if row["issued"] and (
+            invoice.state == InvoiceState.open
+            or (
+                invoice.state == InvoiceState.accepted
+                and invoice.amount_paid < row["amount"]
+            )
+        ):
+            raise BackendError("issued backing HTLC state is unavailable")
+        if row["issued"] and invoice.state in (
+            InvoiceState.settled,
+            InvoiceState.canceled,
+        ):
+            raise MintError("backing HTLC is closed; its tokens have expired", 409)
         if (
             invoice.state != InvoiceState.accepted
             or invoice.amount_paid < row["amount"]
@@ -235,6 +248,11 @@ class Mint:
             }
         entries = []
         for invoice in invoices:
+            if invoice.state == InvoiceState.open or (
+                invoice.state == InvoiceState.accepted
+                and invoice.amount_paid < invoice.amount
+            ):
+                raise BackendError("issued backing HTLC state is unavailable")
             if (
                 invoice.payment_hash in closed
                 or invoice.state != InvoiceState.accepted
@@ -349,6 +367,16 @@ class Mint:
                 signatures=[self._sign(p, int(row["h"], 16)) for p in request.outputs]
             )
             with self.db.transaction() as conn:
+                current = conn.execute(
+                    "SELECT issued,digest,response FROM quotes WHERE quote=?",
+                    (request.quote,),
+                ).fetchone()
+                if current["issued"]:
+                    if current["digest"] == digest:
+                        return SignaturesResponse.model_validate_json(
+                            current["response"]
+                        )
+                    raise MintError("quote already issued to another request", 409)
                 conn.execute(
                     "UPDATE quotes SET issued=1,digest=?,response=? WHERE quote=?",
                     (digest, response.model_dump_json(), request.quote),
@@ -628,6 +656,13 @@ class Mint:
                                 (quote.quote, payment_hash, group["amount"]),
                             )
                 except sqlite3.IntegrityError as exc:
+                    with self.db.read() as conn:
+                        occupied = conn.execute(
+                            "SELECT state FROM melts WHERE payout_hash=?",
+                            (quote.payment_hash,),
+                        ).fetchone()
+                    if occupied is not None and occupied["state"] == "PAID":
+                        raise MintError("payout invoice is already paid", 409) from exc
                     raise MintError(
                         "payout invoice is already reserved or paid", 409
                     ) from exc

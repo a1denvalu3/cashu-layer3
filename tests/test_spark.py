@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import hashlib
 import os
 import time
@@ -397,6 +398,114 @@ async def test_closed_holds_cannot_be_revived_by_stale_sdk_cache(spark, closure)
     htlc.expiry_time = int(time.time()) + 900
     htlc.status = breez.SparkHtlcStatus.WAITING_FOR_PREIMAGE
     assert (await backend.get_invoice(payment_hash)).state == closed.state
+
+
+@pytest.mark.parametrize("elapsed", [0, 61])
+async def test_missing_accepted_hold_is_uncertain_across_restart(
+    spark, tmp_path, monkeypatch, elapsed
+):
+    now = 1_800_000_000
+    monkeypatch.setattr(time, "time", lambda: now)
+    backend, sdk = spark
+    _, payment_hash, payment = await held(spark, expiry=60)
+    accepted = await backend.get_invoice(payment_hash)
+    assert accepted.state == InvoiceState.accepted
+    sdk.payments.clear()
+    now += elapsed  # The unpaid invoice can expire before the funded HTLC does.
+
+    reopened = SparkBackend(tmp_path / "spark.sqlite3", MNEMONIC)
+    reopened.sdk = sdk
+    with pytest.raises(BackendError, match="backing lookup unavailable"):
+        await reopened.get_invoice(payment_hash)
+
+    sdk.payments.append(payment)
+    assert await reopened.get_invoice(payment_hash) == accepted
+
+
+async def test_unseen_funded_hold_is_not_canceled_at_unpaid_invoice_expiry(
+    spark, monkeypatch
+):
+    now = 1_800_000_000
+    monkeypatch.setattr(time, "time", lambda: now)
+    backend, sdk = spark
+    _, payment_hash, payment = await held(spark, expiry=60)
+    # Funding succeeded, but synchronization has not exposed the receive yet.
+    sdk.payments.clear()
+    now += 61
+    with pytest.raises(BackendError, match="funding state unavailable"):
+        await backend.get_invoice(payment_hash)
+    sdk.payments.append(payment)
+    assert (await backend.get_invoice(payment_hash)).state == InvoiceState.accepted
+
+
+async def test_missing_hold_expires_at_observed_funded_deadline(spark, monkeypatch):
+    now = 1_800_000_000
+    monkeypatch.setattr(time, "time", lambda: now)
+    backend, sdk = spark
+    _, payment_hash, payment = await held(spark, expiry=60)
+    accepted = await backend.get_invoice(payment_hash)
+    sdk.payments.clear()
+    now = accepted.hold_expires_at
+    assert (await backend.get_invoice(payment_hash)).state == InvoiceState.canceled
+
+    # Reintroducing a stale, apparently live SDK entry cannot revive the hold.
+    payment.details.htlc_details.expiry_time = now + 900
+    sdk.payments.append(payment)
+    assert (await backend.get_invoice(payment_hash)).state == InvoiceState.canceled
+
+
+async def test_delayed_sdk_snapshot_cannot_override_confirmed_hold_closure(
+    spark, monkeypatch
+):
+    backend, sdk = spark
+    _, payment_hash, payment = await held(spark)
+    await backend.get_invoice(payment_hash)
+    stale = copy.deepcopy(payment)
+    snapshot_waiting = asyncio.Event()
+    release_snapshot = asyncio.Event()
+
+    async def list_payments(request):
+        if not snapshot_waiting.is_set():
+            snapshot_waiting.set()
+            await release_snapshot.wait()
+            return breez.ListPaymentsResponse(payments=[stale])
+        return breez.ListPaymentsResponse(payments=[payment])
+
+    monkeypatch.setattr(sdk, "list_payments", list_payments)
+    delayed_lookup = asyncio.create_task(backend.get_invoice(payment_hash))
+    await snapshot_waiting.wait()
+    payment.details.htlc_details.status = breez.SparkHtlcStatus.RETURNED
+    try:
+        closed = await backend.get_invoice(payment_hash)
+        assert closed.state == InvoiceState.canceled
+    finally:
+        release_snapshot.set()
+    assert (await delayed_lookup).state == InvoiceState.canceled
+
+
+@pytest.mark.parametrize("elapsed", [0, 61])
+def test_missing_sdk_hold_does_not_publish_an_empty_live_backing_list(
+    spark, tmp_path, monkeypatch, elapsed
+):
+    now = 1_800_000_000
+    monkeypatch.setattr(time, "time", lambda: now)
+    backend, sdk = spark
+    mint = Mint(tmp_path / "mint.sqlite3", os.urandom(32), backend)
+    preimage = os.urandom(32)
+    payment_hash = hashlib.sha256(preimage).hexdigest()
+    with TestClient(create_app(mint, recovery=False)) as http:
+        client = Client("http://testserver", http)
+        quote = client.quote(100, payment_hash, expiry=60)
+        payment = sdk.fund(payment_hash)
+        token = client.finish_mint(client.prepare_mint(quote.quote, preimage.hex()))
+        assert len(client.pending_htlcs().htlcs) == 1
+        sdk.payments.clear()
+        now += elapsed
+        assert http.get("/v1/htlcs/pending").status_code == 503
+
+        sdk.payments.append(payment)
+        client.check_backing(token)
+        assert len(client.pending_htlcs().htlcs) == 1
 
 
 async def test_sync_errors_do_not_masquerade_as_missing_payment(spark):
