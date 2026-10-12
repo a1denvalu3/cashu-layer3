@@ -46,6 +46,10 @@ test("shows the mint's two-week policy as a read-only setting", async ({
     });
   });
   await page.goto("/");
+  await expect(page).toHaveTitle("cashu3 — Cash with a deadline");
+  await expect(
+    page.getByRole("link", { name: "cashu3 (cashu cubed) wallet home" }),
+  ).toBeVisible();
   await expect(page.getByText("Mint connected", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(
@@ -53,6 +57,29 @@ test("shows the mint's two-week policy as a read-only setting", async ({
   ).toBeVisible();
   await expect(page.getByText(/Set by the mint/)).toBeVisible();
   await expect(page.getByRole("spinbutton")).toHaveCount(0);
+});
+
+test("shows Spark's minimum CLTV separately from token lifetime", async ({
+  page,
+}) => {
+  await page.route("**/v1/info", async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      json: {
+        ...(await response.json()),
+        default_token_lifetime_blocks: null,
+        funding_htlc_cltv_delta: 60,
+      },
+    });
+  });
+  await page.goto("/");
+  await expect(page.getByText("Mint connected", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(
+    page.getByText(/Minimum Lightning funding timelock: 60 blocks/),
+  ).toBeVisible();
+  await expect(page.getByText(/New tokens:/)).toHaveCount(0);
 });
 
 test("fund, reload, send, receive in a second wallet, melt and expire residual change", async ({

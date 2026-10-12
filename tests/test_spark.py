@@ -5,7 +5,7 @@ import time
 from uuid import uuid4
 
 import pytest
-from bolt11 import decode
+from bolt11 import TagChar, decode, encode
 from fastapi.testclient import TestClient
 
 from cashu.api import create_app
@@ -16,7 +16,11 @@ from cashu.mint import Mint
 from cashu.models import InvoiceState
 
 breez = pytest.importorskip("breez_sdk_spark")
-from cashu.sparkl2 import SparkBackend  # noqa: E402 - optional test dependency
+from cashu.sparkl2 import (  # noqa: E402 - optional test dependency
+    SPARK_MAINNET_MIN_FINAL_CLTV_EXPIRY_DELTA,
+    SparkBackend,
+    SparkConnection,
+)
 
 MNEMONIC = "abandon " * 11 + "about"
 
@@ -116,6 +120,7 @@ class SdkStub:
         self.fail = False
         self.sync_error = False
         self.pages = []
+        self.cltv_delta = SPARK_MAINNET_MIN_FINAL_CLTV_EXPIRY_DELTA
 
     async def sync_wallet(self, request):
         if self.sync_error:
@@ -138,6 +143,9 @@ class SdkStub:
             method.expiry_secs,
             method.description,
         )
+        decoded = decode(invoice)
+        decoded.tags.add(TagChar.min_final_cltv_expiry, self.cltv_delta)
+        invoice = encode(decoded, private_key="11" * 32)
         self.invoices[method.payment_hash] = invoice
         return breez.ReceivePaymentResponse(payment_request=invoice, fee=0)
 
@@ -240,6 +248,76 @@ async def test_funding_is_accepted_without_revealing_preimage(spark):
     assert (await backend.get_invoice(payment_hash)).state == InvoiceState.settled
     await backend.settle_invoice(preimage)
     assert sdk.claims == [preimage.hex()]
+
+
+def test_mainnet_cltv_policy_is_published_without_inventing_token_lifetime(
+    spark, tmp_path
+):
+    backend, _ = spark
+    mint = Mint(tmp_path / "mint.sqlite3", os.urandom(32), backend)
+    with TestClient(create_app(mint, recovery=False)) as http:
+        info = http.get("/v1/info").json()
+    assert info["name"] == "cashu3"
+    assert info["funding_htlc_cltv_delta"] == 60
+    assert info["default_token_lifetime_blocks"] is None
+
+
+@pytest.mark.parametrize("delta", [18, 59, 61, 120])
+async def test_mainnet_invoice_policy_change_is_rejected_before_funding(spark, delta):
+    backend, sdk = spark
+    sdk.cltv_delta = delta
+    with pytest.raises(BackendError, match="CLTV policy changed"):
+        await held(spark)
+    with backend.db.read() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM invoices").fetchone()[0] == 0
+    assert sdk.claims == [] and sdk.payments == []
+
+
+@pytest.mark.parametrize("location", ["database", "sdk"])
+async def test_existing_mainnet_invoice_cannot_bypass_cltv_policy(spark, location):
+    backend, _ = spark
+    _, payment_hash, payment = await held(spark)
+    with backend.db.transaction() as conn:
+        invoice = decode(conn.execute("SELECT request FROM invoices").fetchone()[0])
+        invoice.tags.get(TagChar.min_final_cltv_expiry).data = 59
+        changed = encode(invoice, private_key="11" * 32)
+        if location == "database":
+            conn.execute("UPDATE invoices SET request=?", (changed,))
+        else:
+            payment.details.invoice = changed
+    with pytest.raises(BackendError, match="CLTV policy changed"):
+        await backend.get_invoice(payment_hash)
+    with pytest.raises(BackendError, match="CLTV policy changed"):
+        await backend.create_hold_invoice(1000, payment_hash, 3600)
+
+
+async def test_private_regtest_provider_has_its_own_cltv_policy(tmp_path):
+    connection = SparkConnection(
+        coordinator_identifier="operator",
+        threshold=1,
+        signing_operators=[
+            {
+                "id": 0,
+                "identifier": "operator",
+                "address": "https://operator.test",
+                "identity_public_key": "02" + "11" * 32,
+            }
+        ],
+        ssp_url="http://ssp.test",
+        ssp_identity_public_key="02" + "11" * 32,
+        esplora_url="http://esplora.test",
+    )
+    backend = SparkBackend(
+        tmp_path / "spark.sqlite3", MNEMONIC, network="regtest", connection=connection
+    )
+    sdk = SdkStub()
+    sdk.cltv_delta = 18
+    backend.sdk = sdk
+    _, payment_hash, _ = await held((backend, sdk))
+    invoice = await backend.get_invoice(payment_hash)
+    assert decode(invoice.request).min_final_cltv_expiry == 18
+    assert backend.funding_htlc_cltv_delta is None
+    assert invoice.state == InvoiceState.accepted
 
 
 async def test_invoice_creation_is_persistent_and_amount_bound(spark, tmp_path):
@@ -477,7 +555,11 @@ def test_combined_melt_settles_only_fully_consumed_backing(spark, tmp_path):
         assert sdk.claims == [preimages[0]]
 
 
-def test_partial_melt_delays_claim_and_expires_remaining_denominations(spark, tmp_path):
+def test_partial_melt_claims_at_exact_spark_cutoff_and_expires_remaining_tokens(
+    spark, tmp_path, monkeypatch
+):
+    now = 1_800_000_000
+    monkeypatch.setattr(time, "time", lambda: now)
     backend, sdk = spark
     mint = Mint(tmp_path / "mint.sqlite3", os.urandom(32), backend)
     preimage = os.urandom(32)
@@ -494,13 +576,37 @@ def test_partial_melt_delays_claim_and_expires_remaining_denominations(spark, tm
         assert receipt.fee == 0
         assert sum(p.amount for p in change.proofs) == 991
         assert sdk.claims == []
-        assert client.pending_htlcs().htlcs[0].payment_hash == payment_hash
-        payment.details.htlc_details.expiry_time = int(time.time()) + 60
+        entry = client.pending_htlcs().htlcs[0]
+        assert entry.payment_hash == payment_hash
+        assert (
+            entry.melt_deadline
+            == payment.details.htlc_details.expiry_time - mint.settle_margin_seconds
+        )
+        late_payout, _, _ = receiver(sdk, 1)
+        late_melt = client.prepare_melt(change, late_payout, fee_reserve=0)
+
+        now = entry.melt_deadline - 1
+        asyncio.run(mint.reconcile_holds())
+        assert sdk.claims == []
+        client.check_backing(change)
+        now += 1
+        response = http.post("/v1/melt/bolt11", json=late_melt.request.model_dump())
+        assert response.status_code == 409
+        assert "deadline" in response.json()["detail"]
         asyncio.run(mint.reconcile_holds())
         assert sdk.claims == [preimage.hex()]
         assert client.pending_htlcs().htlcs == []
         with pytest.raises(ClientError):
             client.prepare_swap(change)
+        with pytest.raises(ClientError):
+            client.prepare_melt(change, late_payout, fee_reserve=0)
+        response = http.post("/v1/melt/bolt11", json=late_melt.request.model_dump())
+        assert response.status_code == 409
+        assert "closed" in response.json()["detail"]
+        assert len(sdk.sends) == 1
+        now += 1
+        asyncio.run(mint.reconcile_holds())
+        assert sdk.claims == [preimage.hex()]
 
 
 def test_full_melt_including_fee_claims_backing(spark, tmp_path):

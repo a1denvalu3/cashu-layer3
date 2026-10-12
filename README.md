@@ -1,4 +1,4 @@
-# Cashu Layer3
+# cashu3 — cashu cubed
 
 An experimental Python mint and wallet for **denominated tokens backed by held
 Lightning payments**. Credentials use Pointcheval–Sanders (PS) signatures on
@@ -65,6 +65,10 @@ Requires Python 3.10+ and Poetry:
 poetry install
 make demo
 ```
+
+The project is **cashu3**, pronounced **cashu cubed** and displayed as **cashu³**
+in the wallet. The installed wallet command is `cashu3`; `cashu` remains an alias
+for existing setups.
 
 The persistent fake backend runs in a temporary directory. The demo mints
 1,000 sats, sends exactly 10 through a private split, pays 9 sats, returns unused
@@ -253,6 +257,23 @@ their tokens; partial melts do not create post-settlement user balances.
 Backing checks use SDK-synchronized payment history. SDK 0.17.2 can retain
 cached state when an internal synchronization fails, so these snapshots are
 not independent proof that a contract remains held.
+
+The default mainnet Lightspark SSP advertised a **60-block minimum final-hop
+CLTV delta** in two unpaid HODL invoices checked on 2026-10-12, with invoice
+payment windows of 60 and 3,600 seconds. The Spark mainnet backend pins this as
+`SPARK_MAINNET_MIN_FINAL_CLTV_EXPIRY_DELTA` and rejects an incoming invoice whose
+delta differs. `/v1/info` publishes `funding_htlc_cltv_delta: 60`, and the wallet
+shows it in Settings. Private regtest providers retain their own CLTV policy.
+Recheck the production SSP with
+`poetry run python tests/spark_mainnet_policy.py`; it generates unpaid invoices
+for an ephemeral identity and does not require a Breez API key.
+
+Sixty blocks is approximately ten hours at Bitcoin's average block interval,
+but it is a minimum relative delta rather than an observed expiry height.
+Payer padding and multipart funding can affect the actual Lightning timeout,
+and the Spark backing contract can expire sooner. The mint therefore continues
+to enforce the funded contract's SDK-reported expiry and settlement margin;
+the constant does not give Spark tokens a ten-hour or two-week lifetime.
 
 Melts always pay through Lightning so a payment preimage is available. The
 quoted Lightning fee must fit the user's reserve and the server limit. Before

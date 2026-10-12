@@ -15,6 +15,7 @@ import {
   Clock3,
   Copy,
   Download,
+  Box,
   Layers3,
   LoaderCircle,
   Plus,
@@ -455,11 +456,15 @@ export function App() {
   return (
     <div className="app-shell">
       <header className="header">
-        <a className="brand" href="/" aria-label="Layer3 wallet home">
+        <a
+          className="brand"
+          href="/"
+          aria-label="cashu3 (cashu cubed) wallet home"
+        >
           <span className="brand-mark">
-            <Layers3 size={25} strokeWidth={1.6} />
+            <Box size={25} strokeWidth={1.6} />
           </span>
-          layer<span>3</span>
+          cashu<span>³</span>
           <sup>WALLET</sup>
         </a>
         <nav aria-label="Main navigation">
@@ -858,7 +863,7 @@ export function App() {
               <section className="settings-card">
                 <h2>Your mint</h2>
                 <p className="muted">
-                  Connect to a Layer3 mint that supports this wallet.
+                  Connect to a cashu3 mint that supports this wallet.
                 </p>
                 <form onSubmit={switchMint}>
                   <label htmlFor="mint-url">Mint URL</label>
@@ -893,6 +898,14 @@ export function App() {
                     redemption deadline.
                   </p>
                 )}
+                {manager?.wallet.defaultTokenLifetimeBlocks == null &&
+                  manager?.wallet.fundingHtlcCltvDelta != null && (
+                    <p className="small muted">
+                      Minimum Lightning funding timelock:{" "}
+                      {manager.wallet.fundingHtlcCltvDelta} blocks. Each funded
+                      backing HTLC determines the token redemption deadline.
+                    </p>
+                  )}
               </section>
               <section className="settings-card">
                 <h2>Keep a copy.</h2>
@@ -925,7 +938,7 @@ export function App() {
         <span>
           <span className="status-dot" /> YOUR KEYS LIVE HERE
         </span>
-        <span>Layer3 · Experimental HTLC ecash</span>
+        <span>cashu3 · Experimental HTLC ecash</span>
         <button
           className="text-button small"
           onClick={() => setTab("settings")}
@@ -1347,7 +1360,7 @@ export function App() {
                       );
                     const link = document.createElement("a");
                     link.href = url;
-                    link.download = `layer3-backup-${new Date().toISOString().slice(0, 10)}.json`;
+                    link.download = `cashu3-backup-${new Date().toISOString().slice(0, 10)}.json`;
                     link.click();
                     setTimeout(() => URL.revokeObjectURL(url), 1000);
                     setDialog(null);

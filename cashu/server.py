@@ -32,7 +32,7 @@ def load_seed(path: Path) -> bytes:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     configuration = {**dotenv_values(Path.cwd() / ".env"), **os.environ}
     parser = argparse.ArgumentParser(
-        description="PS ecash mint over Lightning hold invoices"
+        description="cashu3 PS ecash mint over Lightning hold invoices"
     )
     parser.add_argument(
         "--data",

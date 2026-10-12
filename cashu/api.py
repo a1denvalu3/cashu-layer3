@@ -49,7 +49,7 @@ def create_app(mint: Mint, recovery: bool = True) -> FastAPI:
                     pass
             await mint.backend.close()
 
-    app = FastAPI(title="Cashu Layer3", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title="cashu3", version="0.2.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -74,6 +74,9 @@ def create_app(mint: Mint, recovery: bool = True) -> FastAPI:
     @app.get("/v1/info")
     async def info():
         cltv_expiry = getattr(mint.backend, "cltv_expiry", 0)
+        funding_cltv = cltv_expiry or getattr(
+            mint.backend, "funding_htlc_cltv_delta", None
+        )
         token_lifetime = (
             cltv_expiry
             - getattr(mint.backend, "hold_expiry_delta", 0)
@@ -82,7 +85,7 @@ def create_app(mint: Mint, recovery: bool = True) -> FastAPI:
             else None
         )
         return {
-            "name": "Cashu Layer3",
+            "name": "cashu3",
             "unit": "sat",
             "scheme": "PS/BLS12-381",
             "token_version": 3,
@@ -96,7 +99,7 @@ def create_app(mint: Mint, recovery: bool = True) -> FastAPI:
             "settle_margin_blocks": mint.settle_margin_blocks,
             "settle_margin_seconds": mint.settle_margin_seconds,
             "default_token_lifetime_blocks": token_lifetime,
-            "funding_htlc_cltv_delta": cltv_expiry or None,
+            "funding_htlc_cltv_delta": funding_cltv,
         }
 
     @app.get("/v1/keys", response_model=KeysetResponse)

@@ -154,7 +154,7 @@ class FakeBackend(HoldInvoiceBackend):
             if row is not None and row["amount"] != amount:
                 raise BackendError("payment hash already has another invoice amount")
             if row is None:
-                request = self._invoice(amount, payment_hash, expiry, "Layer 3 hold")
+                request = self._invoice(amount, payment_hash, expiry, "cashu3 hold")
                 conn.execute(
                     "INSERT INTO invoices VALUES (?,?,?,?,?,0)",
                     (
@@ -224,7 +224,7 @@ class FakeBackend(HoldInvoiceBackend):
         if len(preimage) != 32 or amount <= 0:
             raise ValueError("need a positive amount and a 32-byte preimage")
         payment_hash = hashlib.sha256(preimage).hexdigest()
-        request = self._invoice(amount, payment_hash, 3600, "Layer 3 receiver")
+        request = self._invoice(amount, payment_hash, 3600, "cashu3 receiver")
         with self.db.transaction() as conn:
             conn.execute(
                 "INSERT INTO receivers VALUES (?,?,?,?)",
@@ -406,7 +406,7 @@ class LndRestBackend(HoldInvoiceBackend):
                     "value": str(amount),
                     "expiry": str(expiry),
                     "cltv_expiry": str(self.cltv_expiry),
-                    "memo": "Layer 3 hold",
+                    "memo": "cashu3 hold",
                 },
             )
             response = LndHoldResponse.model_validate(body)

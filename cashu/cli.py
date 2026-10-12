@@ -91,7 +91,7 @@ def wait_and_mint(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Wallet for denominated, expiring Lightning HTLC tokens"
+        description="cashu3 wallet for denominated, expiring Lightning HTLC tokens"
     )
     parser.add_argument("--mint", help="mint URL (default: http://127.0.0.1:3338)")
     parser.add_argument("--wallet", type=Path, default=Path("data/wallet-v3.sqlite3"))

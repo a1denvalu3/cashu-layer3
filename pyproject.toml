@@ -1,7 +1,7 @@
 [project]
-name = "cashu"
+name = "cashu3"
 version = "0.2.0"
-description = "Denominated PS tokens backed by expiring Lightning holds"
+description = "cashu3 (cashu cubed): denominated PS tokens backed by expiring Lightning holds"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -21,6 +21,7 @@ spark = ["breez-sdk-spark==0.17.2"]
 [project.scripts]
 mint = "cashu.server:main"
 cashu = "cashu.cli:main"
+cashu3 = "cashu.cli:main"
 
 [tool.poetry]
 packages = [{ include = "cashu" }]

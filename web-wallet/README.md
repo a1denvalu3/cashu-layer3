@@ -1,4 +1,4 @@
-# Layer3 web wallet
+# cashu3 web wallet
 
 A responsive browser wallet for the PS/BLS12-381 mint in this repository. Modified
 cashu-ts handles credentials and wire requests; modified Coco manages proofs,

@@ -25,6 +25,11 @@ from .lightning import (
 )
 from .models import InvoiceState
 
+# Verified against unpaid HODL invoices from the SDK's default mainnet SSP on
+# 2026-10-12. This is the invoice's minimum final-hop delta, not the funded
+# Lightning expiry height or the Spark backing transfer's expiry timestamp.
+SPARK_MAINNET_MIN_FINAL_CLTV_EXPIRY_DELTA = 60
+
 
 class SigningOperator(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -75,6 +80,9 @@ class SparkBackend(HoldInvoiceBackend):
         self.api_key = api_key
         self.fee_limit_sat = fee_limit_sat
         self.connection = connection
+        self.funding_htlc_cltv_delta = (
+            SPARK_MAINNET_MIN_FINAL_CLTV_EXPIRY_DELTA if network == "mainnet" else None
+        )
         self.sdk: breez.BreezSdk | None = None
         self._connect_lock = asyncio.Lock()
         self._invoice_lock = asyncio.Lock()
@@ -230,7 +238,7 @@ class SparkBackend(HoldInvoiceBackend):
                     response = await sdk.receive_payment(
                         breez.ReceivePaymentRequest(
                             payment_method=breez.ReceivePaymentMethod.BOLT11_INVOICE(
-                                description="Layer 3 hold",
+                                description="cashu3 hold",
                                 amount_sats=amount,
                                 expiry_secs=expiry,
                                 payment_hash=payment_hash,
@@ -243,6 +251,7 @@ class SparkBackend(HoldInvoiceBackend):
                     if invoice_details(request) != (payment_hash, amount):
                         raise BackendError("Spark backing invoice/hash/amount mismatch")
                     decoded = decode(request)
+                    self._validate_cltv(decoded.min_final_cltv_expiry)
                     with self.db.transaction() as conn:
                         conn.execute(
                             "INSERT INTO invoices (payment_hash,amount,request,expiry) VALUES (?,?,?,?)",
@@ -259,6 +268,16 @@ class SparkBackend(HoldInvoiceBackend):
                     raise BackendError("Spark hold invoice creation failed") from None
             return await self.get_invoice(payment_hash)
 
+    def _validate_cltv(self, delta: int) -> None:
+        if (
+            self.funding_htlc_cltv_delta is not None
+            and delta != self.funding_htlc_cltv_delta
+        ):
+            raise BackendError(
+                "Spark mainnet invoice CLTV policy changed: "
+                f"expected {self.funding_htlc_cltv_delta} blocks, received {delta}"
+            )
+
     async def get_invoice(self, payment_hash: str) -> Invoice:
         with self.db.read() as conn:
             row = conn.execute(
@@ -266,6 +285,7 @@ class SparkBackend(HoldInvoiceBackend):
             ).fetchone()
         if row is None:
             raise BackendError("unknown Spark hold invoice")
+        self._validate_cltv(decode(row["request"]).min_final_cltv_expiry)
         state = InvoiceState(row["state"])
         amount_paid = 0
         deadline = None
@@ -285,6 +305,7 @@ class SparkBackend(HoldInvoiceBackend):
                     details.invoice
                 ) != (payment_hash, row["amount"]):
                     raise BackendError("Spark backing amount does not match the hold")
+                self._validate_cltv(decode(details.invoice).min_final_cltv_expiry)
                 htlc = details.htlc_details
                 deadline = htlc.expiry_time
                 amount_paid = payment.amount
