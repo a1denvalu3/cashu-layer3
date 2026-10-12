@@ -93,18 +93,38 @@ export class Layer3Manager {
     }
   }
   async refresh(): Promise<void> {
+    return this.exclusive(() => this.refreshUnlocked());
+  }
+  private async refreshUnlocked(): Promise<void> {
     try {
+      // Capture claims before the remote snapshot, while holding the same lock
+      // as issuance and spending. An older snapshot must not expire new outputs.
+      const state = await this.repo.read();
       this.snapshot = await this.wallet.pendingHTLCs();
-      const state = await this.repo.read(),
-        changes: { id: string; state: Layer3ProofRecord["state"] }[] = [];
+      const changes: { id: string; state: Layer3ProofRecord["state"] }[] = [];
       const candidates = state.proofs.filter(
         (p) =>
           p.mint === this.wallet.mintUrl &&
-          ["ready", "sent", "pending"].includes(p.state),
+          p.operationId === null &&
+          ["ready", "sent", "pending", "expired"].includes(p.state),
       );
       for (const p of candidates)
-        if (!this.isLive(p.proof)) changes.push({ id: p.id, state: "expired" });
+        if (p.state !== "expired" && !this.isLive(p.proof))
+          changes.push({ id: p.id, state: "expired" });
       const live = candidates.filter((p) => this.isLive(p.proof));
+      // Old snapshots may have falsely expired live claims. Recovery must also
+      // preserve sent status, because unclaimed outgoing tokens still belong
+      // to their recipients even when the mint reports them as unspent.
+      const sent = new Set<string>();
+      if (live.some((p) => p.state === "expired"))
+        for (const row of state.activity)
+          if (
+            row.mint === this.wallet.mintUrl &&
+            row.purpose === "send" &&
+            row.token
+          )
+            for (const proof of decodePSToken(row.token).proofs)
+              sent.add(psNullifier(proof));
       // Closed backing already makes a claim unusable. Its old signing key
       // may be unavailable after a regtest reset or mint replacement.
       for (const p of live) {
@@ -119,10 +139,18 @@ export class Layer3Manager {
           states = await this.wallet.checkProofs(batch.map((p) => p.proof));
         states.forEach((s, i) => {
           if (s === "SPENT") changes.push({ id: batch[i].id, state: "spent" });
-          if (s === "PENDING" && batch[i].state === "ready")
-            changes.push({ id: batch[i].id, state: "pending" });
+          if (s === "PENDING" && ["ready", "expired"].includes(batch[i].state))
+            changes.push({
+              id: batch[i].id,
+              state: sent.has(batch[i].id) ? "sent" : "pending",
+            });
           if (s === "UNSPENT" && batch[i].state === "pending")
             changes.push({ id: batch[i].id, state: "ready" });
+          if (s === "UNSPENT" && batch[i].state === "expired")
+            changes.push({
+              id: batch[i].id,
+              state: sent.has(batch[i].id) ? "sent" : "ready",
+            });
         });
       }
       await this.repo.updateProofStates(changes);
@@ -251,7 +279,7 @@ export class Layer3Manager {
   async send(value: number, paymentHash?: string): Promise<string> {
     return this.exclusive(async () => {
       amountSchema.parse(value);
-      await this.refresh();
+      await this.refreshUnlocked();
       const { proofs } = await this.repo.read(),
         groups = new Map<string, Layer3ProofRecord[]>();
       for (const p of proofs)
@@ -318,7 +346,7 @@ export class Layer3Manager {
         await this.save(op);
         await this.execute(op);
       }
-      await this.refresh();
+      await this.refreshUnlocked();
       return psTokenAmount(token);
     });
   }
@@ -347,7 +375,7 @@ export class Layer3Manager {
             op.payload.quote.payment_hash === quote.payment_hash),
       );
       if (saved) return (await this.execute(saved)).receipt!;
-      await this.refresh();
+      await this.refreshUnlocked();
       const state = await this.repo.read(),
         selected: PSProof[] = [];
       let total = 0;
@@ -431,7 +459,7 @@ export class Layer3Manager {
       await this.changed();
       // A successful receipt remains successful even when the follow-up snapshot is offline.
       try {
-        await this.refresh();
+        await this.refreshUnlocked();
       } catch {
         /* view reports unverified until refresh succeeds */
       }

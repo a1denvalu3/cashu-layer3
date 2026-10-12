@@ -31,6 +31,62 @@ async function fund(page: Page, value: number) {
   return hash;
 }
 
+test("mints after closing the invoice and recovers falsely expired proofs on reload", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.getByText("Mint connected", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Add sats", exact: true }).click();
+  await page.getByLabel("Amount in sats").fill("100");
+  await page.getByRole("button", { name: "Create funding invoice" }).click();
+  await expect(page.getByLabel("Funding invoice")).toHaveValue(/^lnbcrt/);
+  const hash = psInvoiceDetails(
+    await page.getByLabel("Funding invoice").inputValue(),
+  ).paymentHash;
+  await page.getByRole("button", { name: "Close dialog" }).click();
+  await page.request.post(mintUrl + "/test/accept", {
+    data: { payment_hash: hash },
+  });
+  await expect(page.getByTestId("balance")).toHaveText("100sats", {
+    timeout: 15000,
+  });
+  // Reproduce the old wallet's persisted state after a stale snapshot arrived.
+  await page.evaluate(async () => {
+    await new Promise<void>((resolve, reject) => {
+      const opening = indexedDB.open("cashu_layer3_wallet_v3");
+      opening.onerror = () => reject(opening.error);
+      opening.onsuccess = () => {
+        const db = opening.result,
+          transaction = db.transaction("proofs", "readwrite"),
+          cursor = transaction.objectStore("proofs").openCursor();
+        cursor.onsuccess = () => {
+          const row = cursor.result;
+          if (!row) return;
+          row.update({ ...row.value, state: "expired" });
+          row.continue();
+        };
+        transaction.oncomplete = () => {
+          db.close();
+          resolve();
+        };
+        transaction.onabort = () => {
+          db.close();
+          reject(transaction.error);
+        };
+      };
+    });
+  });
+  await page.reload();
+  await expect(page.getByTestId("balance")).toHaveText("100sats");
+  await expect(
+    page.getByRole("heading", { name: "Your backings 1" }),
+  ).toBeVisible();
+  await expect(page.getByText("Added ecash", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Pending operations" }),
+  ).toHaveCount(0);
+});
+
 test("shows the mint's two-week policy as a read-only setting", async ({
   page,
 }) => {

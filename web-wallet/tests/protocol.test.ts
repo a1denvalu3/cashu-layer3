@@ -214,6 +214,132 @@ describe("Python mint ↔ browser cashu-ts protocol", () => {
 });
 
 describe("Coco operation journal and IndexedDB", () => {
+  it("queues background refreshes while a deposit is being minted", async () => {
+    const repo = repository();
+    let snapshots = 0;
+    let mintStarted!: () => void, resumeMint!: () => void;
+    const started = new Promise<void>((resolve) => (mintStarted = resolve));
+    const resume = new Promise<void>((resolve) => (resumeMint = resolve));
+    const manager = new Layer3Manager(repo, mintUrl, async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/v1/htlcs/pending")) snapshots++;
+      const response = await fetch(input, init);
+      if (url.endsWith("/v1/mint/bolt11")) {
+        mintStarted();
+        await resume;
+      }
+      return response;
+    });
+    await manager.init();
+    const funding = await manager.createFunding(100);
+    await control("accept", { payment_hash: funding.id });
+    const minting = manager.pollFunding(funding.id);
+    await started;
+    const before = snapshots,
+      refreshing = manager.refresh();
+    await Promise.resolve();
+    await Promise.resolve();
+    const during = snapshots;
+    resumeMint();
+    await Promise.all([minting, refreshing]);
+    expect(during).toBe(before);
+    expect((await manager.view()).balance).toBe(100);
+    expect((await repo.read()).operations).toEqual([]);
+  });
+  it("recovers falsely expired deposits only after live backing and unspent proof checks", async () => {
+    const repo = repository(),
+      manager = new Layer3Manager(repo, mintUrl);
+    await manager.init();
+    const funding = await manager.createFunding(100);
+    await control("accept", { payment_hash: funding.id });
+    await manager.pollFunding(funding.id);
+    const original = (await repo.read()).proofs;
+    for (const p of original)
+      await repo.proofs.update(p.id, { state: "expired" });
+    const restarted = new Layer3Manager(repo, mintUrl);
+    await restarted.init();
+    expect((await restarted.view()).balance).toBe(100);
+    expect((await restarted.view()).expired).toBe(0);
+    expect((await repo.read()).proofs.map((p) => p.proof)).toEqual(
+      original.map((p) => p.proof),
+    );
+
+    // Another wallet can spend a saved backup's proofs while their HTLC stays live.
+    await wallet.finishSwap(
+      await wallet.prepareSwap({
+        version: 3,
+        mint: mintUrl,
+        proofs: original.map((p) => p.proof),
+      }),
+    );
+    for (const p of original)
+      await repo.proofs.update(p.id, { state: "expired" });
+    await restarted.refresh();
+    expect((await restarted.view()).balance).toBe(0);
+    expect((await repo.read()).proofs.every((p) => p.state === "spent")).toBe(
+      true,
+    );
+  });
+  it("keeps outgoing tokens excluded when recovering live change and never restores closed backing", async () => {
+    const repo = repository(),
+      manager = new Layer3Manager(repo, mintUrl);
+    await manager.init();
+    const funding = await manager.createFunding(100);
+    await control("accept", { payment_hash: funding.id });
+    await manager.pollFunding(funding.id);
+    await manager.send(10);
+    const live = (await repo.read()).proofs.filter((p) =>
+      ["ready", "sent"].includes(p.state),
+    );
+    for (const p of live) await repo.proofs.update(p.id, { state: "expired" });
+    const restarted = new Layer3Manager(repo, mintUrl);
+    await restarted.init();
+    expect((await restarted.view()).balance).toBe(90);
+    expect((await restarted.view()).sent).toBe(10);
+    expect((await restarted.view()).expired).toBe(0);
+    await control("settle", { payment_hash: funding.id });
+    await restarted.refresh();
+    await restarted.refresh();
+    expect((await restarted.view()).balance).toBe(0);
+    expect((await restarted.view()).expired).toBe(100);
+  });
+  it("keeps falsely expired tokens unavailable when spend checks fail or report pending", async () => {
+    const repo = repository();
+    let check: "normal" | "offline" | "pending" = "normal";
+    const manager = new Layer3Manager(repo, mintUrl, async (input, init) => {
+      if (String(input).endsWith("/v1/checkstate")) {
+        if (check === "offline") return new Response("", { status: 503 });
+        if (check === "pending")
+          return new Response(
+            JSON.stringify({
+              states: JSON.parse(String(init?.body)).nullifiers.map(
+                () => "PENDING",
+              ),
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+      }
+      return fetch(input, init);
+    });
+    await manager.init();
+    const funding = await manager.createFunding(100);
+    await control("accept", { payment_hash: funding.id });
+    await manager.pollFunding(funding.id);
+    for (const p of (await repo.read()).proofs)
+      await repo.proofs.update(p.id, { state: "expired" });
+    check = "offline";
+    await expect(manager.refresh()).rejects.toThrow();
+    expect((await manager.view()).balance).toBe(0);
+    expect((await manager.view()).expired).toBe(100);
+    expect((await manager.view()).verified).toBe(false);
+    check = "pending";
+    await manager.refresh();
+    expect((await manager.view()).balance).toBe(0);
+    expect((await manager.view()).reserved).toBe(100);
+    check = "normal";
+    await manager.refresh();
+    expect((await manager.view()).balance).toBe(100);
+  });
   it("preserves and expires old claims when their backing closes and the mint keys change", async () => {
     const repo = repository(),
       manager = new Layer3Manager(repo, mintUrl);

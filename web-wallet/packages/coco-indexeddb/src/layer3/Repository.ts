@@ -158,7 +158,11 @@ export class Layer3IndexedDbRepository
     await this.runTransaction("rw", ["proofs"], async () => {
       for (const { id, state } of changes) {
         const p = await this.proofs.get(id);
-        if (p && ["ready", "sent", "pending"].includes(p.state))
+        if (
+          p &&
+          p.operationId === null &&
+          ["ready", "sent", "pending", "expired"].includes(p.state)
+        )
           await this.proofs.update(id, { state });
       }
     });

@@ -63,6 +63,12 @@ excluded from the available balance. An unavailable mint produces an unverified
 balance. Nothing becomes a claim against a mint balance after HTLC settlement.
 Backups do not extend deadlines.
 
+Background status checks use the same wallet lock as minting and spending, so
+a snapshot taken before issuance cannot expire the newly stored outputs. Reloading
+also rechecks proofs previously marked expired: a live backing, valid credential,
+and an unspent nullifier are required before restoring spendable value. Outgoing
+tokens stay excluded from the balance, and closed backing stays unusable.
+
 Operations save secrets and the **exact request before any spending POST**.
 Retries after a timeout or reload replay that request. Paying the same invoice
 again while an operation is pending reuses its saved request. A timeout or
