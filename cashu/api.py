@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -26,7 +27,9 @@ from .models import (
 )
 
 
-def create_app(mint: Mint, recovery: bool = True) -> FastAPI:
+def create_app(
+    mint: Mint, recovery: bool = True, report_balances: bool = False
+) -> FastAPI:
     async def reconcile():
         while True:
             try:
@@ -39,6 +42,24 @@ def create_app(mint: Mint, recovery: bool = True) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         task = asyncio.create_task(reconcile()) if recovery else None
         try:
+            if report_balances:
+                logger = logging.getLogger("uvicorn.error")
+                backend = mint.backend
+                network = getattr(backend, "network", None)
+                label = backend.name + (f", {network}" if network else "")
+                logger.info("Backend balances (%s):", label)
+                try:
+                    balances = await asyncio.wait_for(
+                        backend.get_balances(), timeout=15
+                    )
+                except Exception:
+                    # Provider errors can contain API keys or wallet secrets.
+                    logger.warning("  Balance unavailable; continuing mint startup")
+                else:
+                    if balances is None:
+                        logger.info("  No real wallet balance (simulated backend)")
+                    for name, amount in (balances or {}).items():
+                        logger.info("  %s: %s sats", name, f"{amount:,}")
             yield
         finally:
             if task:

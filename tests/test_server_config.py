@@ -166,6 +166,24 @@ def test_spark_configuration_uses_file_and_environment(tmp_path, monkeypatch):
     assert args.spark_config_file == Path("local.json")
 
 
+def test_mint_command_reports_balances_at_startup(tmp_path, monkeypatch, caplog):
+    import logging
+
+    from cashu.server import main
+
+    monkeypatch.setattr("sys.argv", ["mint", "--data", str(tmp_path / "mint")])
+
+    def run(app, **kwargs):
+        with TestClient(app) as http:
+            assert http.get("/v1/info").status_code == 200
+
+    monkeypatch.setattr("cashu.server.uvicorn.run", run)
+    with caplog.at_level(logging.INFO, logger="uvicorn.error"):
+        main()
+    assert "Backend balances (fake):" in caplog.text
+    assert "No real wallet balance (simulated backend)" in caplog.text
+
+
 def test_startup_reports_old_database_without_resetting_it(tmp_path, monkeypatch):
     from cashu.server import main
 

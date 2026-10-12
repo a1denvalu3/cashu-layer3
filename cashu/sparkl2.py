@@ -54,6 +54,8 @@ class SparkConnection(BaseModel):
 
 
 class SparkBackend(HoldInvoiceBackend):
+    name = "spark"
+
     def __init__(
         self,
         path: Path,
@@ -570,6 +572,16 @@ class SparkBackend(HoldInvoiceBackend):
                     "SELECT * FROM payments WHERE payment_hash=?", (payment_hash,)
                 ).fetchone()
             return await self._send(row, prepared)
+
+    async def get_balances(self) -> dict[str, int]:
+        sdk = await self._ensure_sdk()
+        try:
+            info = await sdk.get_info(breez.GetInfoRequest(ensure_synced=True))
+            if type(info.balance_sats) is not int or info.balance_sats < 0:
+                raise ValueError("invalid balance")
+            return {"Spark wallet": info.balance_sats}
+        except Exception:
+            raise BackendError("Spark balance lookup failed") from None
 
     async def close(self) -> None:
         if self.sdk is not None:

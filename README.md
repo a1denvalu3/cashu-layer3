@@ -59,6 +59,13 @@ experimental protocol, not a cryptographic guarantee against a dishonest mint.
 
 ## Run the demo
 
+`poetry run mint` logs the selected backend's balances during startup. Spark
+reports its SDK wallet balance; LND reports local and remote channel balances,
+unsettled channel funds, and confirmed and unconfirmed on-chain funds separately.
+Held backing payments are distinct from these operator balances. The fake
+backend has no real wallet balance. If the lookup fails or exceeds 15 seconds,
+the mint logs that balances are unavailable and continues starting.
+
 Requires Python 3.10+ and Poetry:
 
 ```bash

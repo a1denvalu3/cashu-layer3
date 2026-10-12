@@ -204,7 +204,7 @@ def main() -> None:
             "The existing database and seed must be retained for the old protocol."
         ) from None
     print(f"Mint backend: {args.backend}", file=sys.stderr)
-    uvicorn.run(create_app(mint), host=args.host, port=args.port)
+    uvicorn.run(create_app(mint, report_balances=True), host=args.host, port=args.port)
 
 
 if __name__ == "__main__":

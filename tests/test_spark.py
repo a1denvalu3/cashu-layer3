@@ -25,6 +25,36 @@ from cashu.sparkl2 import (  # noqa: E402 - optional test dependency
 MNEMONIC = "abandon " * 11 + "about"
 
 
+@pytest.mark.asyncio
+async def test_spark_operator_balance_uses_synchronized_sdk_info(spark, monkeypatch):
+    backend, sdk = spark
+
+    async def get_info(request):
+        assert request.ensure_synced is True
+        return breez.GetInfoResponse(
+            identity_pubkey="02" + "11" * 32,
+            balance_sats=10000,
+            token_balances={},
+        )
+
+    monkeypatch.setattr(sdk, "get_info", get_info, raising=False)
+    assert await backend.get_balances() == {"Spark wallet": 10000}
+    assert not sdk.claims and not sdk.sends
+
+
+@pytest.mark.asyncio
+async def test_spark_balance_failure_does_not_expose_sdk_secrets(spark, monkeypatch):
+    backend, sdk = spark
+
+    async def get_info(request):
+        raise RuntimeError("secret SDK credentials")
+
+    monkeypatch.setattr(sdk, "get_info", get_info, raising=False)
+    with pytest.raises(BackendError, match="Spark balance lookup failed") as error:
+        await backend.get_balances()
+    assert "secret" not in str(error.value)
+
+
 def sdk_payment(
     request,
     direction,
