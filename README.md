@@ -104,6 +104,92 @@ settlement margin is 6 blocks before cancellation. The fake backend uses a
 Choose margins for your node's operating conditions. The background worker
 runs every 5 seconds; it cannot settle through a node outage or while stopped.
 
+### Local LND regtest with the web wallet
+
+Use the existing funded `~/cashu-regtest` network. `lnd-2` pays the backing hold,
+`lnd-3` backs the mint through REST on port 8081, and `lnd-1` receives melts.
+To resume stopped nodes without resetting their data:
+
+```bash
+cd ~/cashu-regtest
+docker compose -p cashu up -d bitcoind lnd-1 lnd-2 lnd-3
+source ./docker-scripts.sh
+bitcoin-cli-sim -generate 1
+cashu-lightning-sync
+```
+
+A fresh block lets LND report synced again after the regtest chain has been
+idle. Mining advances backing deadlines, so use one block for this check.
+
+The mint's `.env` should contain:
+
+```dotenv
+CASHU_MINT_BACKEND=lnd
+CASHU_MINT_DATA=data/lnd-v3
+CASHU_LND_ENDPOINT=https://localhost:8081
+CASHU_LND_CERT=data/lnd-manual/tls.cert
+CASHU_LND_MACAROON=data/lnd-manual/admin.macaroon
+CASHU_LND_HOLD_EXPIRY_DELTA=18
+```
+
+The local setup already has those credential files. If they are missing, copy
+them from the current mint node:
+
+```bash
+cd ~/cashu-layer3
+mkdir -p data/lnd-manual
+docker cp cashu-lnd-3-1:/root/.lnd/tls.cert data/lnd-manual/tls.cert
+docker cp cashu-lnd-3-1:/root/.lnd/data/chain/bitcoin/regtest/admin.macaroon data/lnd-manual/admin.macaroon
+chmod 600 data/lnd-manual/admin.macaroon
+```
+
+Start the mint and wallet in separate terminals:
+
+```bash
+cd ~/cashu-layer3
+poetry run mint
+```
+
+```bash
+cd ~/cashu-layer3/web-wallet
+npm run dev
+```
+
+Open http://127.0.0.1:5173 and connect to http://127.0.0.1:3338 in Settings.
+Choose **Add sats**, enter an amount such as 1,000, and copy the funding invoice.
+Pay it from the regtest payer:
+
+```bash
+cd ~/cashu-regtest
+source ./docker-scripts.sh
+lncli-sim 2 payinvoice --force '<funding invoice>'
+```
+
+This terminal remains pending while the HTLC is held. The web wallet credits
+ecash once funding is accepted, before the original Lightning payment settles.
+Leave that terminal open and create a payout invoice in another terminal:
+
+```bash
+cd ~/cashu-regtest
+source ./docker-scripts.sh
+lncli-sim 1 addinvoice --amt 100 | jq -r '.payment_request'
+```
+
+Paste the invoice into **Pay with Lightning** and confirm. A partial melt keeps
+the original hold pending; its remaining tokens retain the backing deadline.
+For an automated check using temporary mint databases and this network's direct
+mint-to-receiver route, run:
+
+```bash
+cd ~/cashu-layer3
+poetry run python tests/regtest/run.py \
+  --payer-container cashu-lnd-2-1 \
+  --receiver-container cashu-lnd-1-1
+```
+
+The full-value melt in that check requires a zero-fee route. The web wallet can
+use routes with fees by reserving extra tokens for the payment.
+
 ### Spark with the Breez Python SDK
 
 Install the optional SDK and select a dedicated mint wallet and data directory:
