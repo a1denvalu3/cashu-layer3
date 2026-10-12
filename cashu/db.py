@@ -49,3 +49,7 @@ class MintError(Exception):
 
 class BackendError(Exception):
     pass
+
+
+class IncompatibleMintDatabase(ValueError):
+    pass

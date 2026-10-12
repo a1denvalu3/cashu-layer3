@@ -7,6 +7,7 @@ import uvicorn
 from dotenv import dotenv_values
 
 from .api import create_app
+from .db import IncompatibleMintDatabase
 from .lightning import FakeBackend, HoldInvoiceBackend, LndRestBackend
 from .mint import Mint
 
@@ -165,13 +166,21 @@ def main() -> None:
     args = parse_args()
     backend = create_backend(args)
     seed = load_seed(args.data / "mint.seed")
-    mint = Mint(
-        args.data / "mint.sqlite3",
-        seed,
-        backend,
-        args.settle_margin_blocks,
-        args.settle_margin_seconds,
-    )
+    try:
+        mint = Mint(
+            args.data / "mint.sqlite3",
+            seed,
+            backend,
+            args.settle_margin_blocks,
+            args.settle_margin_seconds,
+        )
+    except IncompatibleMintDatabase as exc:
+        raise SystemExit(
+            f"Cannot open {args.data / 'mint.sqlite3'}: {exc}.\n"
+            "Set CASHU_MINT_DATA in .env to a new v3 directory, "
+            "or pass --data <new-directory>.\n"
+            "The existing database and seed must be retained for the old protocol."
+        ) from None
     print(f"Mint backend: {args.backend}", file=sys.stderr)
     uvicorn.run(create_app(mint), host=args.host, port=args.port)
 

@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -102,3 +103,35 @@ def test_spark_configuration_uses_file_and_environment(tmp_path, monkeypatch):
     args = parse_args(["--spark-config-file", "local.json"])
     assert args.spark_network == "regtest"
     assert args.spark_config_file == Path("local.json")
+
+
+def test_startup_reports_old_database_without_resetting_it(tmp_path, monkeypatch):
+    from cashu.server import main
+
+    data = tmp_path / "old-mint"
+    data.mkdir()
+    seed = b"s" * 32
+    (data / "mint.seed").write_bytes(seed)
+    with sqlite3.connect(data / "mint.sqlite3") as db:
+        db.execute("CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT)")
+        db.execute("INSERT INTO metadata VALUES ('protocol','ps-htlc-claim-v2')")
+        db.execute("CREATE TABLE quotes (quote TEXT PRIMARY KEY)")
+        db.execute("INSERT INTO quotes VALUES ('previous-claim')")
+    (tmp_path / ".env").write_text(f"CASHU_MINT_DATA={data}\n")
+    monkeypatch.setattr("sys.argv", ["mint"])
+    with pytest.raises(SystemExit) as exc:
+        main()
+    message = str(exc.value)
+    assert str(data / "mint.sqlite3") in message
+    assert "CASHU_MINT_DATA" in message
+    assert "--data <new-directory>" in message
+    assert (data / "mint.seed").read_bytes() == seed
+    with sqlite3.connect(data / "mint.sqlite3") as db:
+        assert db.execute("SELECT * FROM metadata").fetchall() == [
+            ("protocol", "ps-htlc-claim-v2")
+        ]
+        assert db.execute("SELECT * FROM quotes").fetchall() == [("previous-claim",)]
+        assert {
+            r[0]
+            for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        } == {"metadata", "quotes"}

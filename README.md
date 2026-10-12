@@ -295,6 +295,11 @@ There is no automatic conversion of old whole-claim balances into v3. Preserve
 old databases and complete their claims using the previous version; use fresh
 mint and wallet directories for this protocol.
 
+If `poetry run mint` reports a previous protocol, check `CASHU_MINT_DATA` in
+your existing `.env`: it overrides the default v3 directory. For an old LND
+setup using `data/lnd-manual`, set `CASHU_MINT_DATA=data/lnd-v3` and restart.
+Keep the old directory, including its database and seed.
+
 ## Verification
 
 ```bash

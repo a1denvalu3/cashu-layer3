@@ -25,7 +25,7 @@ from .crypto.ps import (
     verify_presentation,
     verify_private_presentation,
 )
-from .db import BackendError, Database, MintError
+from .db import BackendError, Database, IncompatibleMintDatabase, MintError
 from .keyset import COMMON_H_DST, Keyset, common_h_statements, denominations
 from .lightning import HoldInvoiceBackend, Invoice, PaymentState, invoice_details
 from .models import (
@@ -97,7 +97,7 @@ class Mint:
             if metadata.get("protocol") not in (None, "ps-htlc-denominations-v3") or (
                 "quotes" in tables and "protocol" not in metadata
             ):
-                raise ValueError(
+                raise IncompatibleMintDatabase(
                     "mint database uses a previous protocol; use a new v3 database"
                 )
             if metadata.get("seed_fingerprint", fingerprint) != fingerprint:
