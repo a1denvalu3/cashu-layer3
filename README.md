@@ -168,8 +168,8 @@ CASHU_LND_HOLD_EXPIRY_DELTA=18
 CASHU_LND_TOKEN_LIFETIME_BLOCKS=2016
 ```
 
-The local setup already has those credential files. If they are missing, copy
-them from the current mint node:
+The local setup already has those credential files. If they are missing or
+the regtest node has been recreated, copy them from the current mint node:
 
 ```bash
 cd ~/cashu-layer3
@@ -178,6 +178,15 @@ docker cp cashu-lnd-3-1:/root/.lnd/tls.cert data/lnd-manual/tls.cert
 docker cp cashu-lnd-3-1:/root/.lnd/data/chain/bitcoin/regtest/admin.macaroon data/lnd-manual/admin.macaroon
 chmod 600 data/lnd-manual/admin.macaroon
 ```
+
+A fixture reset can replace LND's TLS certificate, macaroon and node identity.
+Stale credentials make `/v1/htlcs/pending` return 503 even while `/v1/keys`
+returns 200. After a reset, refresh the credentials and restart the mint. If the
+node identity changed, its old invoices are gone: retain the old mint directory
+and seed, then set `CASHU_MINT_DATA` to a fresh directory for the new node.
+Old tokens lose their backing. Reload the wallet so it loads the new keyset;
+closed claims remain in its history as expired. Reapply the payer's
+`max-cltv-expiry=4096` setting if its node configuration was also reset.
 
 Start the mint and wallet in separate terminals:
 

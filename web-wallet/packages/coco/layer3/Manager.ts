@@ -101,16 +101,18 @@ export class Layer3Manager {
           p.mint === this.wallet.mintUrl &&
           ["ready", "sent", "pending"].includes(p.state),
       );
-      for (const p of candidates) {
+      for (const p of candidates)
+        if (!this.isLive(p.proof)) changes.push({ id: p.id, state: "expired" });
+      const live = candidates.filter((p) => this.isLive(p.proof));
+      // Closed backing already makes a claim unusable. Its old signing key
+      // may be unavailable after a regtest reset or mint replacement.
+      for (const p of live) {
         const identity = JSON.stringify(p.proof);
         if (!this.verifiedProofs.has(identity)) {
           this.wallet.verifyProof(p.proof);
           this.verifiedProofs.add(identity);
         }
       }
-      for (const p of candidates)
-        if (!this.isLive(p.proof)) changes.push({ id: p.id, state: "expired" });
-      const live = candidates.filter((p) => this.isLive(p.proof));
       for (let start = 0; start < live.length; start += 256) {
         const batch = live.slice(start, start + 256),
           states = await this.wallet.checkProofs(batch.map((p) => p.proof));

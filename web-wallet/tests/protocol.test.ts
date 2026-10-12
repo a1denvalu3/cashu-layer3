@@ -15,6 +15,7 @@ import {
 } from "@cashu/cashu-ts/layer3";
 import { Layer3Manager } from "coco-cashu-core/layer3";
 import { Layer3IndexedDbRepository } from "coco-cashu-indexeddb/layer3";
+import { denominationKeysetId } from "../packages/cashu-ts/src/layer3/crypto";
 
 let process: ChildProcess, mintUrl: string, wallet: PSWallet;
 const repos: Layer3IndexedDbRepository[] = [];
@@ -186,6 +187,49 @@ describe("Python mint ↔ browser cashu-ts protocol", () => {
 });
 
 describe("Coco operation journal and IndexedDB", () => {
+  it("preserves and expires old claims when their backing closes and the mint keys change", async () => {
+    const repo = repository(),
+      manager = new Layer3Manager(repo, mintUrl);
+    await manager.init();
+    const funding = await manager.createFunding(32);
+    await control("accept", { payment_hash: funding.id });
+    await manager.pollFunding(funding.id);
+    const saved = (await repo.read()).proofs[0];
+    const replacement = new Layer3Manager(
+      repo,
+      mintUrl,
+      async (input, init) => {
+        const response = await fetch(input, init);
+        if (!String(input).endsWith("/v1/keys")) return response;
+        const current = await response.json(),
+          keys = {
+            ...current.keys,
+            "1": current.keys["2"],
+            "2": current.keys["1"],
+          };
+        return new Response(
+          JSON.stringify({ ...current, id: denominationKeysetId(keys), keys }),
+          {
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    // Live claims must still pass signature/keyset verification.
+    await expect(replacement.init()).rejects.toThrow();
+    expect((await replacement.view()).verified).toBe(false);
+    expect((await repo.read()).proofs[0].state).toBe("ready");
+
+    await control("settle", { payment_hash: funding.id });
+    await replacement.init();
+    const view = await replacement.view(),
+      expired = (await repo.read()).proofs[0];
+    expect(view.verified).toBe(true);
+    expect(view.balance).toBe(0);
+    expect(view.expired).toBe(32);
+    expect(expired.state).toBe("expired");
+    expect(expired.proof).toEqual(saved.proof);
+  });
   it("recovers an identical private-swap request after a lost response and reload", async () => {
     const repo = repository();
     let dropped = false;
