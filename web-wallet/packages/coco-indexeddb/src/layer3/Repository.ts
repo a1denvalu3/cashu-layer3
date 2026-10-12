@@ -65,6 +65,21 @@ export class Layer3IndexedDbRepository
         )
       )
         throw new Error("Quote already has a saved mint request");
+      const meltQuoteId =
+        op.payload.kind === "melt" ? op.payload.quote.quote : null;
+      const payoutHash =
+        op.payload.kind === "melt" ? op.payload.quote.payment_hash : null;
+      if (
+        meltQuoteId &&
+        (await this.operations.toArray()).some(
+          (existing) =>
+            existing.mint === op.mint &&
+            existing.payload.kind === "melt" &&
+            (existing.payload.quote.quote === meltQuoteId ||
+              existing.payload.quote.payment_hash === payoutHash),
+        )
+      )
+        throw new Error("Quote already has a saved melt request; retry it");
       for (const p of inputs) {
         const existing = await this.proofs.get(p.id);
         if (
@@ -109,6 +124,30 @@ export class Layer3IndexedDbRepository
         await this.operations.delete(op.id);
       },
     );
+  }
+  async release(op: Layer3Operation): Promise<void> {
+    await this.runTransaction("rw", ["operations", "proofs"], async () => {
+      const saved = await this.operations.get(op.id);
+      if (!saved) return;
+      if (
+        saved.mint !== op.mint ||
+        JSON.stringify(saved.payload) !== JSON.stringify(op.payload)
+      )
+        throw new Error("Saved operation changed");
+      const inputs = await this.proofs
+        .where("operationId")
+        .equals(op.id)
+        .toArray();
+      for (const proof of inputs) {
+        if (proof.state !== "reserved")
+          throw new Error("Input reservation changed");
+        await this.proofs.update(proof.id, {
+          state: "ready",
+          operationId: null,
+        });
+      }
+      await this.operations.delete(op.id);
+    });
   }
   async setError(id: string, error: string): Promise<void> {
     await this.operations.update(id, { error: error.slice(0, 500) });

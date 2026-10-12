@@ -408,6 +408,142 @@ describe("Coco operation journal and IndexedDB", () => {
     expect((await restarted.view()).balance).toBe(0);
     expect((await repo.read()).operations).toEqual([]);
   });
+  it("reuses the saved melt request when the same quote is submitted again", async () => {
+    const repo = repository(),
+      requests: string[] = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      if (String(input).endsWith("/v1/melt/bolt11")) {
+        requests.push(String(init?.body));
+        return new Response(
+          JSON.stringify({ detail: "Payout status unknown" }),
+          {
+            status: 503,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
+      return fetch(input, init);
+    };
+    const manager = new Layer3Manager(repo, mintUrl, fetcher);
+    await manager.init();
+    const funding = await manager.createFunding(100);
+    await control("accept", { payment_hash: funding.id });
+    await manager.pollFunding(funding.id);
+    const { request } = await control("receiver", { amount: 10 });
+    const quote = await manager.meltQuote(request, 2);
+    await expect(manager.melt(quote)).rejects.toThrow("unknown");
+    const anotherQuote = await manager.meltQuote(request, 2);
+    expect(anotherQuote.quote).not.toBe(quote.quote);
+    await expect(manager.melt(anotherQuote)).rejects.toThrow("unknown");
+    expect(requests).toHaveLength(2);
+    expect(requests[0]).toBe(requests[1]);
+    expect((await repo.read()).operations).toHaveLength(1);
+    expect((await manager.view()).reserved).toBe(64);
+    expect((await manager.view()).balance).toBe(36);
+  });
+  it("releases a definitively failed melt after checking the inputs are unspent", async () => {
+    const repo = repository();
+    let fail = true;
+    const fetcher: typeof fetch = async (input, init) => {
+      if (fail && String(input).endsWith("/v1/melt/bolt11"))
+        return new Response(
+          JSON.stringify({ detail: "melt payment failed; tokens are unspent" }),
+          { status: 409, headers: { "Content-Type": "application/json" } },
+        );
+      return fetch(input, init);
+    };
+    const manager = new Layer3Manager(repo, mintUrl, fetcher);
+    await manager.init();
+    const funding = await manager.createFunding(100);
+    await control("accept", { payment_hash: funding.id });
+    await manager.pollFunding(funding.id);
+    const { request } = await control("receiver", { amount: 10 });
+    const quote = await manager.meltQuote(request, 2);
+    await expect(manager.melt(quote)).rejects.toThrow("tokens are unspent");
+    expect((await repo.read()).operations).toEqual([]);
+    expect((await manager.view()).balance).toBe(100);
+    fail = false;
+    expect((await manager.melt(quote)).amount).toBe(10);
+    expect((await manager.view()).balance).toBe(88);
+  });
+  it("keeps a rejected melt reserved when the proof-state check is unavailable", async () => {
+    const repo = repository();
+    let rejected = false;
+    const fetcher: typeof fetch = async (input, init) => {
+      if (String(input).endsWith("/v1/melt/bolt11")) {
+        rejected = true;
+        return new Response(
+          JSON.stringify({ detail: "melt payment failed; tokens are unspent" }),
+          { status: 409, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (rejected && String(input).endsWith("/v1/checkstate"))
+        throw new TypeError("Proof check offline");
+      return fetch(input, init);
+    };
+    const manager = new Layer3Manager(repo, mintUrl, fetcher);
+    await manager.init();
+    const funding = await manager.createFunding(100);
+    await control("accept", { payment_hash: funding.id });
+    await manager.pollFunding(funding.id);
+    const { request } = await control("receiver", { amount: 10 });
+    const quote = await manager.meltQuote(request, 2);
+    await expect(manager.melt(quote)).rejects.toThrow("tokens are unspent");
+    expect((await repo.read()).operations).toHaveLength(1);
+    expect((await manager.view()).reserved).toBe(64);
+  });
+  it("recovers an old duplicate melt without releasing the original reservation", async () => {
+    const repo = repository();
+    let dropped = false;
+    const fetcher: typeof fetch = async (input, init) => {
+      const response = await fetch(input, init);
+      if (String(input).endsWith("/v1/melt/bolt11") && !dropped) {
+        dropped = true;
+        throw new TypeError("Lost melt receipt");
+      }
+      return response;
+    };
+    const manager = new Layer3Manager(repo, mintUrl, fetcher);
+    await manager.init();
+    const funding = await manager.createFunding(100);
+    await control("accept", { payment_hash: funding.id });
+    await manager.pollFunding(funding.id);
+    const { request } = await control("receiver", { amount: 10 });
+    const quote = await manager.meltQuote(request, 2);
+    await expect(manager.melt(quote)).rejects.toThrow("Lost");
+    const state = await repo.read(),
+      original = state.operations[0],
+      input = state.proofs.find(
+        (p) => p.state === "ready" && p.proof.amount === 32,
+      )!,
+      payload = await manager.wallet.prepareMelt(
+        { version: 3, mint: mintUrl, proofs: [input.proof] },
+        quote,
+      ),
+      duplicate = {
+        ...original,
+        id: payload.id,
+        payload,
+        createdAt: original.createdAt + 1,
+      };
+    // Model a duplicate saved by the old wallet, before the repository guard existed.
+    await repo.operations.add(duplicate);
+    await repo.proofs.update(input.id, {
+      state: "reserved",
+      operationId: duplicate.id,
+    });
+    await expect(manager.retry(duplicate.id)).rejects.toThrow(
+      "another request",
+    );
+    const remaining = await repo.read();
+    expect(remaining.operations.map((op) => op.id)).toEqual([original.id]);
+    expect(remaining.proofs.find((p) => p.id === input.id)?.state).toBe(
+      "ready",
+    );
+    expect((await manager.retry(original.id)).receipt?.amount).toBe(10);
+    expect((await manager.view()).balance).toBe(88);
+    expect((await repo.read()).operations).toEqual([]);
+  });
   it("excludes remotely pending proofs and rejects the redemption deadline boundary", async () => {
     const repo = repository();
     let pending = false;

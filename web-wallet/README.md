@@ -64,8 +64,11 @@ balance. Nothing becomes a claim against a mint balance after HTLC settlement.
 Backups do not extend deadlines.
 
 Operations save secrets and the **exact request before any spending POST**.
-Retries after a timeout or reload replay that request. A failed response never
-automatically releases input reservations. Pending operations appear with a
+Retries after a timeout or reload replay that request. Paying the same invoice
+again while an operation is pending reuses its saved request. A timeout or
+uncertain failure keeps its input reservations. A definite payout failure or
+duplicate-request rejection releases them only after the mint confirms every
+input is unspent. Pending operations appear with a
 Retry button. Browser Web Locks coordinate tabs; IndexedDB transactions also
 prevent duplicate reservations. Clearing browser data without a current backup
 loses the wallet. Serve this origin only with code you trust: live wallet data

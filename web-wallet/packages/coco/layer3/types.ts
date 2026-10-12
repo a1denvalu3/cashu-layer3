@@ -70,6 +70,7 @@ export interface Layer3Repository {
     proofs: Layer3ProofRecord[],
     activity: Layer3Activity,
   ): Promise<void>;
+  release(operation: Layer3Operation): Promise<void>;
   setError(id: string, message: string): Promise<void>;
   updateProofStates(
     changes: { id: string; state: Layer3ProofState }[],

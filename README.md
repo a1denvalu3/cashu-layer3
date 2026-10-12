@@ -395,8 +395,11 @@ value are stored atomically **before** full-consumption settlement. A response
 lost after payout is recovered from Lightning's tracked payment without paying
 again. Exact retries return the original signatures and receipt.
 
-A definite payout failure releases all inputs. An uncertain or pending payout
-keeps them reserved. Wallet abandonment requires **every** input to be unspent.
+A definite payout failure releases all inputs and is retained as a terminal
+failure for that quote. Replaying that request never starts another payment;
+a new quote is required to authorize another attempt. An uncertain or pending
+payout keeps its inputs reserved. Wallet abandonment requires **every** input
+to be unspent.
 Failure cannot make a disclosed preimage unknown again: the mint retains it for
 scheduled settlement. A paid melt receipt says `PAID`, regardless of whether
 its backing HTLCs remain held or have subsequently closed.

@@ -272,6 +272,46 @@ def test_same_invoice_cannot_pay_twice_with_different_backing(service):
     ).states == ["UNSPENT"]
 
 
+def test_definite_failed_pending_melt_releases_inputs_without_another_send(
+    service, monkeypatch
+):
+    import asyncio
+
+    from cashu.lightning import Payment, PaymentState
+
+    token, invoice = service.fund(64)
+    operation = service.client.prepare_melt(token, invoice, fee_reserve=0)
+    sends = []
+
+    async def pending(request, fee_limit_sat=None):
+        sends.append(request)
+        return Payment(PaymentState.pending)
+
+    monkeypatch.setattr(service.backend, "pay_invoice", pending)
+    with pytest.raises(ClientError, match="pending"):
+        service.client.finish_melt(operation)
+
+    async def failed(payment_hash):
+        return Payment(PaymentState.failed)
+
+    monkeypatch.setattr(service.backend, "get_payment", failed)
+    with pytest.raises(ClientError, match="failed"):
+        service.client.finish_melt(operation)
+    assert len(sends) == 1
+    assert service.client.check(
+        [service.client.nullifier(proof) for proof in token.proofs]
+    ).states == ["UNSPENT"]
+    with service.mint.db.read() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM melts").fetchone()[0] == 0
+        row = conn.execute("SELECT reserved,preimage FROM quotes").fetchone()
+    assert row["reserved"] == 0
+    assert row["preimage"] == token.proofs[0].preimage
+    asyncio.run(service.mint.resume_pending_melts())
+    with pytest.raises(ClientError, match="failed"):
+        service.client.finish_melt(operation)
+    assert len(sends) == 1
+
+
 def test_melt_fee_reserve_is_enforced_before_payment(service):
     token, _ = service.fund(16)
     invoice = service.backend.receiver_invoice(10, os.urandom(32))

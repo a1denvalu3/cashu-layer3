@@ -114,6 +114,7 @@ class Mint:
                 "CREATE TABLE IF NOT EXISTS nullifiers (nullifier TEXT PRIMARY KEY, state TEXT NOT NULL, kind TEXT NOT NULL, digest TEXT NOT NULL, response TEXT)",
                 "CREATE TABLE IF NOT EXISTS melt_quotes (quote TEXT PRIMARY KEY, payload TEXT NOT NULL)",
                 "CREATE TABLE IF NOT EXISTS melts (quote TEXT PRIMARY KEY REFERENCES melt_quotes(quote), payout_hash TEXT UNIQUE NOT NULL, request TEXT NOT NULL, digest TEXT NOT NULL, state TEXT NOT NULL, response TEXT)",
+                "CREATE TABLE IF NOT EXISTS failed_melts (quote TEXT PRIMARY KEY REFERENCES melt_quotes(quote), digest TEXT NOT NULL)",
                 "CREATE TABLE IF NOT EXISTS melt_inputs (melt TEXT NOT NULL REFERENCES melts(quote) ON DELETE CASCADE, payment_hash TEXT NOT NULL REFERENCES quotes(payment_hash), amount INTEGER NOT NULL, PRIMARY KEY(melt,payment_hash))",
             ):
                 conn.execute(statement)
@@ -488,6 +489,15 @@ class Mint:
                 previous = conn.execute(
                     "SELECT * FROM melts WHERE quote=?", (quote.quote,)
                 ).fetchone()
+                failed = conn.execute(
+                    "SELECT digest FROM failed_melts WHERE quote=?", (quote.quote,)
+                ).fetchone()
+            if failed is not None:
+                if failed["digest"] != digest:
+                    raise MintError(
+                        "melt quote already belongs to another request", 409
+                    )
+                raise MintError("melt payment failed; tokens are unspent", 409)
             if previous is not None:
                 if previous["digest"] != digest:
                     raise MintError(
@@ -621,12 +631,23 @@ class Mint:
                     raise MintError(
                         "payout invoice is already reserved or paid", 409
                     ) from exc
-            return await self._finish_melt(request, quote, digest)
+            return await self._finish_melt(request, quote, digest, retry_failed=True)
 
     async def _finish_melt(
-        self, request: MeltRequest, quote: MeltQuoteResponse, digest: str
+        self,
+        request: MeltRequest,
+        quote: MeltQuoteResponse,
+        digest: str,
+        retry_failed: bool = False,
     ) -> MeltResponse:
         payment = await self.backend.get_payment(quote.payment_hash)
+        if (
+            payment is not None
+            and payment.state == PaymentState.failed
+            and not retry_failed
+        ):
+            self._release_melt(quote.quote, digest, payment_failed=True)
+            raise MintError("melt payment failed; tokens are unspent", 409)
         if payment is None or payment.state == PaymentState.failed:
             with self.db.read() as conn:
                 rows = conn.execute(
@@ -647,7 +668,7 @@ class Mint:
         if payment.state == PaymentState.pending:
             raise MintError("melt payment is pending; retry the same request", 409)
         if payment.state == PaymentState.failed:
-            self._release_melt(quote.quote, digest)
+            self._release_melt(quote.quote, digest, payment_failed=True)
             raise MintError("melt payment failed; tokens are unspent", 409)
         if (
             payment.preimage is None
@@ -723,8 +744,13 @@ class Mint:
         await self.reconcile_holds()
         return response
 
-    def _release_melt(self, quote_id: str, digest: str):
+    def _release_melt(self, quote_id: str, digest: str, payment_failed: bool = False):
         with self.db.transaction() as conn:
+            if payment_failed:
+                conn.execute(
+                    "INSERT OR IGNORE INTO failed_melts (quote,digest) SELECT quote,digest FROM melts WHERE quote=? AND digest=? AND state='PENDING'",
+                    (quote_id, digest),
+                )
             for row in conn.execute(
                 "SELECT payment_hash,amount FROM melt_inputs WHERE melt=?", (quote_id,)
             ).fetchall():

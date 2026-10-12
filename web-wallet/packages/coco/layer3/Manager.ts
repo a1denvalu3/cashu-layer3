@@ -1,6 +1,7 @@
 /** Coco's durable prepare/reserve/execute/finalize lifecycle for Layer3 credentials. */
 import {
   PSWallet,
+  PSMintError,
   decodePSToken,
   encodePSToken,
   psDenominations,
@@ -338,6 +339,14 @@ export class Layer3Manager {
   }
   async melt(quote: PSMeltQuote): Promise<PSReceipt> {
     return this.exclusive(async () => {
+      const saved = (await this.repo.read()).operations.find(
+        (op) =>
+          op.mint === this.wallet.mintUrl &&
+          op.payload.kind === "melt" &&
+          (op.payload.quote.quote === quote.quote ||
+            op.payload.quote.payment_hash === quote.payment_hash),
+      );
+      if (saved) return (await this.execute(saved)).receipt!;
       await this.refresh();
       const state = await this.repo.read(),
         selected: PSProof[] = [];
@@ -431,8 +440,26 @@ export class Layer3Manager {
       const message =
         error instanceof Error ? error.message : "Operation failed";
       await this.repo.setError(op.id, message);
+      if (
+        op.payload.kind === "melt" &&
+        error instanceof PSMintError &&
+        error.status === 409 &&
+        [
+          "melt payment failed; tokens are unspent",
+          "melt quote already belongs to another request",
+          "payout invoice is already reserved or paid",
+        ].includes(error.message)
+      ) {
+        try {
+          const states = await this.wallet.checkProofs(op.payload.token.proofs);
+          if (states.every((state) => state === "UNSPENT"))
+            await this.repo.release(op);
+        } catch {
+          // Keep reservations when the authoritative proof check is unavailable.
+        }
+      }
       await this.changed();
-      // Never release reservations solely because a POST timed out or returned an error.
+      // Ambiguous failures remain reserved; only checked, definite rejections release.
       throw error;
     }
   }
