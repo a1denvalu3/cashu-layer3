@@ -77,6 +77,33 @@ afterAll(async () => {
 });
 
 describe("Python mint ↔ browser cashu-ts protocol", () => {
+  it("bypasses ngrok warnings for mint reads and quote requests", async () => {
+    const requests: { method: string; headers: Headers }[] = [];
+    const tunneled = new PSWallet(
+      "https://mint.ngrok-free.app",
+      async (input, init) => {
+        requests.push({
+          method: init?.method ?? "GET",
+          headers: new Headers(init?.headers),
+        });
+        return fetch(mintUrl + new URL(String(input)).pathname, init);
+      },
+    );
+    await tunneled.loadMint();
+    await tunneled.createMintQuote(32, psPreimageHash(psRandomHex()));
+    expect(requests.some((r) => r.method === "POST")).toBe(true);
+    expect(requests.some((r) => r.method === "GET")).toBe(true);
+    for (const request of requests)
+      expect(request.headers.get("ngrok-skip-browser-warning")).toBe("1");
+    const normalRequests: Headers[] = [];
+    const normal = new PSWallet(mintUrl, async (input, init) => {
+      normalRequests.push(new Headers(init?.headers));
+      return fetch(input, init);
+    });
+    await normal.loadMint();
+    for (const headers of normalRequests)
+      expect(headers.has("ngrok-skip-browser-warning")).toBe(false);
+  });
   it("reads the mint lifetime policy and supports mints without block settings", async () => {
     expect(wallet.defaultTokenLifetimeBlocks).toBeNull();
     expect(wallet.fundingHtlcCltvDelta).toBeNull();

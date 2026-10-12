@@ -126,14 +126,19 @@ export class PSWallet {
     this.mintUrl = normalizePSMintUrl(mintUrl);
   }
   private async request(path: string, body?: unknown): Promise<unknown> {
+    const headers: Record<string, string> = { Accept: "application/json" };
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    if (
+      /\.(ngrok-free\.app|ngrok-free\.dev|ngrok\.app|ngrok\.dev|ngrok\.io)$/.test(
+        new URL(this.mintUrl).hostname,
+      )
+    )
+      headers["ngrok-skip-browser-warning"] = "1";
     const response = await this.fetcher(this.mintUrl + path, {
       method: body === undefined ? "GET" : "POST",
       cache: "no-store",
       credentials: "omit",
-      headers:
-        body === undefined
-          ? { Accept: "application/json" }
-          : { "Content-Type": "application/json", Accept: "application/json" },
+      headers,
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(90000),
     });

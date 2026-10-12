@@ -54,7 +54,7 @@ def create_app(mint: Mint, recovery: bool = True) -> FastAPI:
         CORSMiddleware,
         allow_origins=["*"],
         allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type"],
+        allow_headers=["*"],
     )
 
     @app.exception_handler(MintError)
