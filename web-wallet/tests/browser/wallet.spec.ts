@@ -112,6 +112,95 @@ async function fund(page: Page, value: number) {
   return hash;
 }
 
+test("completes a pending payment without a manual retry or a second payment", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.getByText("Mint connected", { exact: true })).toBeVisible();
+  await fund(page, 100);
+  const requests: string[] = [];
+  await page.route(mintUrl + "/v1/melt/bolt11", async (route) => {
+    requests.push(route.request().postData()!);
+    if (requests.length === 1) {
+      const response = await route.fetch();
+      expect(response.ok()).toBe(true);
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          detail: "melt payment is pending; retry the same request",
+        }),
+      });
+    } else await route.continue();
+  });
+  const invoice = (
+    await (
+      await page.request.post(mintUrl + "/test/receiver", {
+        data: { amount: 10 },
+      })
+    ).json()
+  ).request;
+  await page
+    .getByRole("button", { name: "Pay with Lightning", exact: true })
+    .click();
+  await page.getByLabel("Lightning invoice").fill(invoice);
+  await expect(page.getByRole("spinbutton")).toHaveCount(0);
+  await page.getByRole("button", { name: "Review payment" }).click();
+  await expect(page.getByText("up to 2 sats", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Pay 10 sats", exact: true }).click();
+  await expect(page.getByText("Paid 10 sats · 2 sat fee.")).toBeVisible();
+  await expect(page.getByTestId("balance")).toHaveText("88sats");
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "Pending operations" }),
+  ).toHaveCount(0);
+  expect(requests).toHaveLength(2);
+  expect(requests[0]).toBe(requests[1]);
+});
+
+test("shows a slow payment as pending while preserving its request", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.getByText("Mint connected", { exact: true })).toBeVisible();
+  await fund(page, 100);
+  await page.route(mintUrl + "/v1/melt/bolt11", (route) =>
+    route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({
+        detail: "melt payment is pending; retry the same request",
+      }),
+    }),
+  );
+  const invoice = (
+    await (
+      await page.request.post(mintUrl + "/test/receiver", {
+        data: { amount: 10 },
+      })
+    ).json()
+  ).request;
+  await page
+    .getByRole("button", { name: "Pay with Lightning", exact: true })
+    .click();
+  await page.getByLabel("Lightning invoice").fill(invoice);
+  await page.getByRole("button", { name: "Review payment" }).click();
+  await page.getByRole("button", { name: "Pay 10 sats", exact: true }).click();
+  await expect(
+    page.getByText(
+      "Payment pending. Your request is saved; use Retry to check it safely.",
+    ),
+  ).toBeVisible({ timeout: 15000 });
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "Pending operations" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Retry", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByTestId("balance")).toHaveText("36sats");
+});
+
 test("mints after closing the invoice and recovers falsely expired proofs on reload", async ({
   page,
 }) => {
@@ -271,8 +360,12 @@ test("fund, reload, send, receive in a second wallet, melt and expire residual c
     .getByRole("button", { name: "Pay with Lightning", exact: true })
     .click();
   await bob.getByLabel("Lightning invoice").fill(invoice);
-  await bob.getByLabel("Maximum routing fee (sats)").fill("3");
+  await expect(bob.getByRole("spinbutton")).toHaveCount(0);
   await bob.getByRole("button", { name: "Review payment" }).click();
+  await expect(
+    bob.getByText("Mint fee reserve", { exact: true }),
+  ).toBeVisible();
+  await expect(bob.getByText("up to 2 sats", { exact: true })).toBeVisible();
   await bob.getByRole("button", { name: "Pay 7 sats", exact: true }).click();
   await expect(bob.getByText("Paid 7 sats · 2 sat fee.")).toBeVisible();
   await expect(bob.getByTestId("balance")).toHaveText("1sats");

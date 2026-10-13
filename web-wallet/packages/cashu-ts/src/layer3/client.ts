@@ -65,6 +65,13 @@ export class PSMintError extends Error {
     this.name = "PSMintError";
   }
 }
+export function isPSPendingMeltError(error: unknown): error is PSMintError {
+  return (
+    error instanceof PSMintError &&
+    error.status === 409 &&
+    error.message === "melt payment is pending; retry the same request"
+  );
+}
 export function psDenominations(value: number): number[] {
   if (!Number.isSafeInteger(value) || value < 0 || value > MAX_AMOUNT)
     throw new Error("Invalid amount");
@@ -457,20 +464,16 @@ export class PSWallet {
       ),
     };
   }
-  async createMeltQuote(
-    request: string,
-    feeReserve?: number,
-  ): Promise<PSMeltQuote> {
+  async createMeltQuote(request: string): Promise<PSMeltQuote> {
     const invoice = psInvoiceDetails(request);
-    const body = { request, fee_reserve: feeReserve ?? null };
+    const body = { request };
     const quote = meltQuoteSchema.parse(
       await this.request("/v1/melt/quote/bolt11", body),
     );
     if (
       quote.request !== request ||
       quote.payment_hash !== invoice.paymentHash ||
-      quote.amount !== invoice.amount ||
-      (feeReserve !== undefined && quote.fee_reserve !== feeReserve)
+      quote.amount !== invoice.amount
     )
       throw new Error("Mint returned an inconsistent melt quote");
     return quote;

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 import uvicorn
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -34,13 +34,22 @@ class PaymentControl(BaseModel):
     state: Literal["IN_FLIGHT", "FAILED"] | None
 
 
+class FeePolicy(BaseModel):
+    fee_limit_sat: int = Field(ge=0)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=3339)
+    parser.add_argument("--fee-limit-sat", type=int, default=2)
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="cashu-web-test-") as directory:
         path = Path(directory)
-        backend = FakeBackend(path / "fake.sqlite3", fee_msat=1500)
+        backend = FakeBackend(
+            path / "fake.sqlite3",
+            fee_msat=1500,
+            fee_limit_sat=args.fee_limit_sat,
+        )
         mint = Mint(path / "mint.sqlite3", bytes.fromhex("42" * 32), backend)
         app = create_app(mint)
 
@@ -91,6 +100,12 @@ def main():
                         (request.payment_hash, request.state),
                     )
             return {"updated": True}
+
+        @app.post("/test/fee-policy")
+        async def fee_policy(request: FeePolicy):
+            mint.fee_limit_sat = request.fee_limit_sat
+            backend.fee_limit_sat = request.fee_limit_sat
+            return {"configured": True}
 
         uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="error")
 

@@ -38,6 +38,7 @@ import {
   normalizePSMintUrl,
   psTokenAmount,
   checkPSBacking,
+  isPSPendingMeltError,
   type PSMeltQuote,
 } from "@cashu/cashu-ts/layer3";
 import { decryptBackup, encryptBackup } from "./backup";
@@ -266,8 +267,7 @@ export function App() {
   const [selectedHash, setSelectedHash] = useState(""),
     [tokenText, setTokenText] = useState(""),
     [invoice, setInvoice] = useState("");
-  const [feeReserve, setFeeReserve] = useState("10"),
-    [quote, setQuote] = useState<PSMeltQuote | null>(null);
+  const [quote, setQuote] = useState<PSMeltQuote | null>(null);
   const [funding, setFunding] = useState<Layer3Funding | null>(null),
     [password, setPassword] = useState(""),
     [backupFile, setBackupFile] = useState<File | null>(null);
@@ -384,7 +384,14 @@ export function App() {
     try {
       return await fn();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      if (isPSPendingMeltError(err)) {
+        setDialog(null);
+        setNotice(
+          "Payment pending. Your request is saved; use Retry to check it safely.",
+        );
+      } else {
+        setError(err instanceof Error ? err.message : "Something went wrong");
+      }
     } finally {
       setBusy(false);
       busyRef.current = false;
@@ -541,7 +548,11 @@ export function App() {
         )}
         {notice && (
           <div className="banner" role="status">
-            <CheckCircle2 size={18} />
+            {notice.startsWith("Payment pending.") ? (
+              <Clock3 size={18} />
+            ) : (
+              <CheckCircle2 size={18} />
+            )}
             {notice}
           </div>
         )}
@@ -1234,7 +1245,6 @@ export function App() {
                     setQuote(
                       await manager!.meltQuote(
                         invoice.trim().replace(/^lightning:/i, ""),
-                        Number(feeReserve),
                       ),
                     ),
                   );
@@ -1252,19 +1262,9 @@ export function App() {
                   onChange={(e) => setInvoice(e.target.value)}
                   spellCheck={false}
                 />
-                <label htmlFor="fee-reserve">Maximum routing fee (sats)</label>
-                <input
-                  id="fee-reserve"
-                  type="number"
-                  min="0"
-                  step="1"
-                  required
-                  value={feeReserve}
-                  onChange={(e) => setFeeReserve(e.target.value)}
-                />
                 <p className="small muted">
-                  Unused fee reserve comes back as ecash while its backing
-                  remains active.
+                  The mint quotes the fee reserve. Any unused reserve comes back
+                  as ecash while its backing remains active.
                 </p>
                 <button className="button dark full" disabled={busy}>
                   {busy ? (
@@ -1283,7 +1283,7 @@ export function App() {
                     <strong>{format(quote.amount)} sats</strong>
                   </div>
                   <div>
-                    <span>Fee reserve</span>
+                    <span>Mint fee reserve</span>
                     <strong>up to {format(quote.fee_reserve)} sats</strong>
                   </div>
                   <div className="payment-total">

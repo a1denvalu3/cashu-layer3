@@ -29,6 +29,7 @@ from .models import InvoiceState
 # 2026-10-12. This is the invoice's minimum final-hop delta, not the funded
 # Lightning expiry height or the Spark backing transfer's expiry timestamp.
 SPARK_MAINNET_MIN_FINAL_CLTV_EXPIRY_DELTA = 60
+SPARK_SEND_PAYMENT_COMPLETION_TIMEOUT_SECONDS = 30
 
 
 class SigningOperator(BaseModel):
@@ -490,7 +491,8 @@ class SparkBackend(HoldInvoiceBackend):
                 breez.SendPaymentRequest(
                     prepare_response=prepared,
                     options=breez.SendPaymentOptions.BOLT11_INVOICE(
-                        prefer_spark=False, completion_timeout_secs=0
+                        prefer_spark=False,
+                        completion_timeout_secs=SPARK_SEND_PAYMENT_COMPLETION_TIMEOUT_SECONDS,
                     ),
                     idempotency_key=row["idempotency_key"],
                 )

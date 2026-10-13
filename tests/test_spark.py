@@ -546,6 +546,86 @@ async def test_fee_cap_is_enforced_before_send(spark):
     assert payment.preimage == preimage
 
 
+def test_first_melt_waits_for_spark_completion_without_another_payment(
+    spark, tmp_path, monkeypatch
+):
+    backend, sdk = spark
+    original = sdk.send_payment
+    timeouts = []
+
+    async def send(request):
+        timeouts.append(request.options.completion_timeout_secs)
+        response = await original(request)
+        if not request.options.completion_timeout_secs:
+            # The SDK's immediate mode can return PENDING even as the
+            # independently completing payment becomes visible in its cache.
+            response = copy.deepcopy(response)
+            response.payment.status = breez.PaymentStatus.PENDING
+            response.payment.details.htlc_details.preimage = None
+        return response
+
+    monkeypatch.setattr(sdk, "send_payment", send)
+    mint = Mint(tmp_path / "mint.sqlite3", bytes.fromhex("42" * 32), backend)
+    with TestClient(create_app(mint, recovery=False)) as http:
+        client = Client("http://testserver", http)
+        preimage = os.urandom(32).hex()
+        quote = client.quote(100, hashlib.sha256(bytes.fromhex(preimage)).hexdigest())
+        sdk.fund(quote.payment_hash)
+        token = client.finish_mint(client.prepare_mint(quote.quote, preimage))
+        payout, _, _ = receiver(sdk)
+        operation = client.prepare_melt(token, payout, fee_reserve=1)
+        response = http.post("/v1/melt/bolt11", json=operation.request.model_dump())
+        assert response.status_code == 200
+        receipt = client.finish_melt(operation)
+        assert receipt.amount == 10
+        assert len(sdk.sends) == len(sdk.provider) == 1
+        assert len(timeouts) == 1 and 0 < timeouts[0] <= 60
+
+
+def test_spark_completion_timeout_preserves_pending_inputs_and_exact_retry(
+    spark, tmp_path, monkeypatch
+):
+    backend, sdk = spark
+    original = sdk.send_payment
+
+    async def send(request):
+        response = await original(request)
+        response.payment.status = breez.PaymentStatus.PENDING
+        response.payment.details.htlc_details.status = (
+            breez.SparkHtlcStatus.WAITING_FOR_PREIMAGE
+        )
+        response.payment.details.htlc_details.preimage = None
+        return response
+
+    monkeypatch.setattr(sdk, "send_payment", send)
+    mint = Mint(tmp_path / "mint.sqlite3", bytes.fromhex("42" * 32), backend)
+    with TestClient(create_app(mint, recovery=False)) as http:
+        client = Client("http://testserver", http)
+        preimage = os.urandom(32).hex()
+        quote = client.quote(100, hashlib.sha256(bytes.fromhex(preimage)).hexdigest())
+        sdk.fund(quote.payment_hash)
+        token = client.finish_mint(client.prepare_mint(quote.quote, preimage))
+        payout, _, payout_preimage = receiver(sdk)
+        operation = client.prepare_melt(token, payout, fee_reserve=1)
+        response = http.post("/v1/melt/bolt11", json=operation.request.model_dump())
+        assert response.status_code == 409
+        assert (
+            response.json()["detail"]
+            == "melt payment is pending; retry the same request"
+        )
+        assert client.check([client.nullifier(p) for p in token.proofs]).states == [
+            "PENDING"
+        ] * len(token.proofs)
+        payment = sdk.provider[sdk.sends[0][0]]
+        payment.status = breez.PaymentStatus.COMPLETED
+        payment.details.htlc_details.status = breez.SparkHtlcStatus.PREIMAGE_SHARED
+        payment.details.htlc_details.preimage = payout_preimage.hex()
+        receipt = client.finish_melt(operation)
+        assert receipt.amount == 10
+        assert len(sdk.sends) == len(sdk.provider) == 1
+        assert client.finish_melt(operation) == receipt
+
+
 @pytest.mark.parametrize("cache_saved", [True, False])
 async def test_lost_send_response_recovers_after_restart(spark, tmp_path, cache_saved):
     backend, sdk = spark

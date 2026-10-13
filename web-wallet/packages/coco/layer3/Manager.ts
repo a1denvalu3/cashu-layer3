@@ -2,6 +2,7 @@
 import {
   PSWallet,
   PSMintError,
+  isPSPendingMeltError,
   decodePSToken,
   encodePSToken,
   psDenominations,
@@ -14,6 +15,7 @@ import {
   type PSProof,
   type PSToken,
   type PSMeltQuote,
+  type PSMeltOperation,
   type PSReceipt,
   type PSSnapshot,
 } from "@cashu/cashu-ts/layer3";
@@ -389,8 +391,8 @@ export class Layer3Manager {
       return psTokenAmount(token);
     });
   }
-  async meltQuote(invoice: string, feeReserve?: number): Promise<PSMeltQuote> {
-    return this.wallet.createMeltQuote(invoice, feeReserve);
+  async meltQuote(invoice: string): Promise<PSMeltQuote> {
+    return this.wallet.createMeltQuote(invoice);
   }
   async attachPreimage(paymentHash: string, preimage: string): Promise<void> {
     return this.exclusive(async () => {
@@ -459,6 +461,23 @@ export class Layer3Manager {
       return this.execute(op);
     });
   }
+  private async finishMelt(op: PSMeltOperation) {
+    for (let check = 0; ; check++) {
+      try {
+        return await this.wallet.finishMelt(op);
+      } catch (error) {
+        // Reconcile only an explicit pending response. Every check replays
+        // the persisted request, with the same inputs and change secrets.
+        if (!isPSPendingMeltError(error) || check >= 4) throw error;
+        await this.repo.setError(
+          op.id,
+          "Payment is pending; checking for completion.",
+        );
+        await this.changed();
+        await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+      }
+    }
+  }
   private async execute(op: Layer3Operation): Promise<Layer3Activity> {
     try {
       const activity: Layer3Activity = {
@@ -490,7 +509,7 @@ export class Layer3Manager {
           );
         }
       } else {
-        const result = await this.wallet.finishMelt(op.payload);
+        const result = await this.finishMelt(op.payload);
         activity.receipt = result.receipt;
         proofs = result.token?.proofs.map((p) => this.record(p)) ?? [];
       }

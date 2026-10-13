@@ -50,10 +50,14 @@ over HTTPS and use an HTTPS mint; browsers block mixed-content requests.
   is lost or the tab closes. Tokens from another mint require explicitly
   connecting to that mint first. A backing without a preimage offers an
   **Add backing preimage** action.
-- **Pay with Lightning:** verifies the signed BOLT11 invoice, shows its amount
-  and maximum fee, and combines eligible backings when necessary. Each melt
+- **Pay with Lightning:** verifies the signed BOLT11 invoice, requests the mint's
+  fee quote, and shows its amount and the mint's fee reserve. The wallet reserves
+  enough ecash for that quote and combines eligible backings when necessary. Each melt
   reveals the complete preimage of every backing used. Change stays tied to its
   original backing; expired change is shown in the payment receipt.
+  An explicit pending response triggers bounded automatic checks of the exact
+  saved request. If completion takes longer, the payment stays in Pending
+  operations with its inputs reserved and a Retry action; it is shown as pending.
 - **Settings:** exports/restores password-encrypted backups containing proofs,
   backing preimages, pending request secrets, and the outgoing token history.
   Restore requires an empty wallet in a new browser profile. A snapshot backup

@@ -297,6 +297,12 @@ sending, the adapter saves the SDK's transfer UUID and original fee cap. After
 a lost response it checks all pages of SDK payment history and reuses the same
 UUID and fee cap if the payment is not yet cached. Uncertain outcomes keep
 inputs reserved; a completed payment without its preimage remains pending.
+The initial SDK send waits up to 30 seconds for completion. If it is still
+pending, the web wallet checks the exact saved request automatically and shows
+a pending status when its bounded checks end. Pending never means payment failed.
+The web wallet submits the invoice without a fee override. It displays and uses
+the mint's quoted `fee_reserve`; any unused amount returns with its change while
+the backing remains live.
 
 Accepted incoming holds and their funded deadlines are persisted. A temporarily
 missing SDK receive record produces an unavailable-status error, rather than an

@@ -168,7 +168,7 @@ describe("Python mint ↔ browser cashu-ts protocol", () => {
     };
     await expect(wallet.prepareSwap(combined)).rejects.toThrow("exactly one");
     const { request } = await control("receiver", { amount: 40 });
-    const quote = await wallet.createMeltQuote(request, 10);
+    const quote = await wallet.createMeltQuote(request);
     const op = await wallet.prepareMelt(combined, quote),
       result = await wallet.finishMelt(op);
     expect(result.receipt.fee).toBe(2);
@@ -200,7 +200,7 @@ describe("Python mint ↔ browser cashu-ts protocol", () => {
       }),
     ).toThrow();
     const { request } = await control("receiver", { amount: 10 });
-    const quote = await wallet.createMeltQuote(request, 2);
+    const quote = await wallet.createMeltQuote(request);
     await expect(
       wallet.prepareMelt(
         {
@@ -214,6 +214,140 @@ describe("Python mint ↔ browser cashu-ts protocol", () => {
 });
 
 describe("Coco operation journal and IndexedDB", () => {
+  it("uses the mint's fee quote and returns its unused reserve as change", async () => {
+    await control("fee-policy", { fee_limit_sat: 5 });
+    try {
+      const repo = repository(),
+        quoteRequests: unknown[] = [],
+        manager = new Layer3Manager(repo, mintUrl, async (input, init) => {
+          if (String(input).endsWith("/v1/melt/quote/bolt11"))
+            quoteRequests.push(JSON.parse(String(init?.body)));
+          return fetch(input, init);
+        });
+      await manager.init();
+      const funding = await manager.createFunding(100);
+      await control("accept", { payment_hash: funding.id });
+      await manager.pollFunding(funding.id);
+      const tooLarge = await control("receiver", { amount: 96 });
+      const tooLargeQuote = await manager.meltQuote(tooLarge.request);
+      expect(tooLargeQuote.fee_reserve).toBe(5);
+      await expect(manager.melt(tooLargeQuote)).rejects.toThrow("Not enough");
+      expect((await repo.read()).operations).toEqual([]);
+      const payable = await control("receiver", { amount: 95 });
+      const quote = await manager.meltQuote(payable.request);
+      expect(quote.fee_reserve).toBe(5);
+      const receipt = await manager.melt(quote);
+      expect(receipt.amount).toBe(95);
+      expect(receipt.fee).toBe(2);
+      expect((await manager.view()).balance).toBe(3);
+      expect(quoteRequests).toEqual([
+        { request: tooLarge.request },
+        { request: payable.request },
+      ]);
+    } finally {
+      await control("fee-policy", { fee_limit_sat: 2 });
+    }
+  });
+  it("reconciles a pending melt automatically using its exact saved request", async () => {
+    const repo = repository(),
+      requests: string[] = [];
+    let pending = true;
+    const manager = new Layer3Manager(repo, mintUrl, async (input, init) => {
+      const response = await fetch(input, init);
+      if (String(input).endsWith("/v1/melt/bolt11")) {
+        requests.push(String(init?.body));
+        if (pending) {
+          pending = false;
+          expect(response.ok).toBe(true);
+          const state = await repo.read();
+          expect(state.operations).toHaveLength(1);
+          expect(
+            state.proofs.filter((p) => p.state === "reserved"),
+          ).not.toHaveLength(0);
+          return new Response(
+            JSON.stringify({
+              detail: "melt payment is pending; retry the same request",
+            }),
+            { status: 409, headers: { "Content-Type": "application/json" } },
+          );
+        }
+      }
+      return response;
+    });
+    await manager.init();
+    const funding = await manager.createFunding(100);
+    await control("accept", { payment_hash: funding.id });
+    await manager.pollFunding(funding.id);
+    const { request } = await control("receiver", { amount: 10 });
+    const quote = await manager.meltQuote(request);
+    expect((await manager.melt(quote)).amount).toBe(10);
+    expect(requests).toHaveLength(2);
+    expect(requests[0]).toBe(requests[1]);
+    expect((await repo.read()).operations).toEqual([]);
+    expect((await manager.view()).balance).toBe(88);
+  });
+  it("keeps a long-running melt reserved after bounded automatic checks", async () => {
+    const repo = repository(),
+      requests: string[] = [];
+    const manager = new Layer3Manager(repo, mintUrl, async (input, init) => {
+      if (String(input).endsWith("/v1/melt/bolt11")) {
+        requests.push(String(init?.body));
+        return new Response(
+          JSON.stringify({
+            detail: "melt payment is pending; retry the same request",
+          }),
+          { status: 409, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return fetch(input, init);
+    });
+    await manager.init();
+    const funding = await manager.createFunding(100);
+    await control("accept", { payment_hash: funding.id });
+    await manager.pollFunding(funding.id);
+    const { request } = await control("receiver", { amount: 10 });
+    await expect(
+      manager.melt(await manager.meltQuote(request)),
+    ).rejects.toThrow("pending");
+    expect(requests.length).toBeGreaterThan(1);
+    expect(requests.length).toBeLessThanOrEqual(5);
+    expect(new Set(requests).size).toBe(1);
+    const state = await repo.read();
+    expect(state.operations).toHaveLength(1);
+    expect(
+      state.proofs
+        .filter((p) => p.state === "reserved")
+        .reduce((n, p) => n + p.proof.amount, 0),
+    ).toBe(64);
+    expect(state.activity.some((a) => a.purpose === "melt")).toBe(false);
+  });
+  it("does not automatically retry an unavailable response containing pending text", async () => {
+    const repo = repository();
+    let attempts = 0;
+    const manager = new Layer3Manager(repo, mintUrl, async (input, init) => {
+      if (String(input).endsWith("/v1/melt/bolt11")) {
+        attempts++;
+        return new Response(
+          JSON.stringify({
+            detail: "melt payment is pending; retry the same request",
+          }),
+          { status: 503, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return fetch(input, init);
+    });
+    await manager.init();
+    const funding = await manager.createFunding(100);
+    await control("accept", { payment_hash: funding.id });
+    await manager.pollFunding(funding.id);
+    const { request } = await control("receiver", { amount: 10 });
+    await expect(
+      manager.melt(await manager.meltQuote(request)),
+    ).rejects.toThrow("pending");
+    expect(attempts).toBe(1);
+    expect((await repo.read()).operations).toHaveLength(1);
+    expect((await manager.view()).reserved).toBe(64);
+  });
   it("journals every backing of a combined receive before its first swap", async () => {
     const first = await mint(32),
       second = await mint(64),
@@ -649,7 +783,7 @@ describe("Coco operation journal and IndexedDB", () => {
     await control("accept", { payment_hash: funding.id });
     await manager.pollFunding(funding.id);
     const { request } = await control("receiver", { amount: 98 });
-    const quote = await manager.meltQuote(request, 2);
+    const quote = await manager.meltQuote(request);
     await expect(manager.melt(quote)).rejects.toThrow("Lost");
     expect((await repo.read()).operations).toHaveLength(1);
     expect(
@@ -689,9 +823,9 @@ describe("Coco operation journal and IndexedDB", () => {
     await control("accept", { payment_hash: funding.id });
     await manager.pollFunding(funding.id);
     const { request } = await control("receiver", { amount: 10 });
-    const quote = await manager.meltQuote(request, 2);
+    const quote = await manager.meltQuote(request);
     await expect(manager.melt(quote)).rejects.toThrow("unknown");
-    const anotherQuote = await manager.meltQuote(request, 2);
+    const anotherQuote = await manager.meltQuote(request);
     expect(anotherQuote.quote).not.toBe(quote.quote);
     await expect(manager.melt(anotherQuote)).rejects.toThrow("unknown");
     expect(requests).toHaveLength(2);
@@ -717,7 +851,7 @@ describe("Coco operation journal and IndexedDB", () => {
     await control("accept", { payment_hash: funding.id });
     await manager.pollFunding(funding.id);
     const { request } = await control("receiver", { amount: 10 });
-    const quote = await manager.meltQuote(request, 2);
+    const quote = await manager.meltQuote(request);
     await expect(manager.melt(quote)).rejects.toThrow("tokens are unspent");
     expect((await repo.read()).operations).toEqual([]);
     expect((await manager.view()).balance).toBe(100);
@@ -733,13 +867,13 @@ describe("Coco operation journal and IndexedDB", () => {
     await control("accept", { payment_hash: funding.id });
     await manager.pollFunding(funding.id);
     const { request } = await control("receiver", { amount: 10 });
-    const quote = await manager.meltQuote(request, 2);
+    const quote = await manager.meltQuote(request);
     await control("expire-melt-quote", { quote: quote.quote });
     await expect(manager.melt(quote)).rejects.toThrow("melt quote has expired");
     expect((await repo.read()).operations).toEqual([]);
     expect((await manager.view()).reserved).toBe(0);
     expect((await manager.view()).balance).toBe(100);
-    const fresh = await manager.meltQuote(request, 2);
+    const fresh = await manager.meltQuote(request);
     expect((await manager.melt(fresh)).amount).toBe(10);
     expect((await manager.view()).balance).toBe(88);
   });
@@ -761,7 +895,7 @@ describe("Coco operation journal and IndexedDB", () => {
       await manager.pollFunding(funding.id);
     }
     const { request } = await control("receiver", { amount: 80 });
-    const quote = await manager.meltQuote(request, 2);
+    const quote = await manager.meltQuote(request);
     closedHash = expired.id;
     await expect(manager.melt(quote)).rejects.toThrow(/backing HTLC/);
     expect((await repo.read()).operations).toEqual([]);
@@ -790,7 +924,7 @@ describe("Coco operation journal and IndexedDB", () => {
     await control("accept", { payment_hash: funding.id });
     await manager.pollFunding(funding.id);
     const { request } = await control("receiver", { amount: 10 });
-    const quote = await manager.meltQuote(request, 2);
+    const quote = await manager.meltQuote(request);
     await expect(manager.melt(quote)).rejects.toThrow("tokens are unspent");
     expect((await repo.read()).operations).toHaveLength(1);
     expect((await manager.view()).reserved).toBe(64);
@@ -814,7 +948,7 @@ describe("Coco operation journal and IndexedDB", () => {
     await manager.pollFunding(funding.id);
     const { request } = await control("receiver", { amount: 10 });
     await expect(
-      manager.melt(await manager.meltQuote(request, 2)),
+      manager.melt(await manager.meltQuote(request)),
     ).rejects.toThrow("not fully accepted");
     expect((await repo.read()).operations).toHaveLength(1);
     expect((await manager.view()).reserved).toBe(64);
@@ -827,14 +961,14 @@ describe("Coco operation journal and IndexedDB", () => {
     await control("accept", { payment_hash: funding.id });
     await manager.pollFunding(funding.id);
     const { request } = await control("receiver", { amount: 10 });
-    const otherQuote = await wallet.createMeltQuote(request, 2),
+    const otherQuote = await wallet.createMeltQuote(request),
       other = await wallet.prepareMelt(await mint(32), otherQuote);
     await control("payment-state", {
       payment_hash: otherQuote.payment_hash,
       state: "IN_FLIGHT",
     });
     await expect(wallet.finishMelt(other)).rejects.toThrow("pending");
-    const quote = await manager.meltQuote(request, 2);
+    const quote = await manager.meltQuote(request);
     await expect(manager.melt(quote)).rejects.toThrow(
       "payout invoice is already reserved or paid",
     );
@@ -862,12 +996,12 @@ describe("Coco operation journal and IndexedDB", () => {
     await control("accept", { payment_hash: funding.id });
     await manager.pollFunding(funding.id);
     const { request } = await control("receiver", { amount: 10 });
-    const otherQuote = await wallet.createMeltQuote(request, 2);
+    const otherQuote = await wallet.createMeltQuote(request);
     await wallet.finishMelt(
       await wallet.prepareMelt(await mint(32), otherQuote),
     );
     await expect(
-      manager.melt(await manager.meltQuote(request, 2)),
+      manager.melt(await manager.meltQuote(request)),
     ).rejects.toThrow("payout invoice is already paid");
     expect((await repo.read()).operations).toEqual([]);
     expect((await manager.view()).reserved).toBe(0);
@@ -890,7 +1024,7 @@ describe("Coco operation journal and IndexedDB", () => {
     await control("accept", { payment_hash: funding.id });
     await manager.pollFunding(funding.id);
     const { request } = await control("receiver", { amount: 10 });
-    const quote = await manager.meltQuote(request, 2);
+    const quote = await manager.meltQuote(request);
     await expect(manager.melt(quote)).rejects.toThrow("Lost");
     const state = await repo.read(),
       original = state.operations[0],
