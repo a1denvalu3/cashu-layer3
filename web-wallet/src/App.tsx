@@ -18,9 +18,12 @@ import {
   Box,
   Layers3,
   LoaderCircle,
+  Monitor,
+  Moon,
   Plus,
   RefreshCw,
   ShieldCheck,
+  Sun,
   Upload,
   X,
   Zap,
@@ -42,6 +45,8 @@ import {
   type PSMeltQuote,
 } from "@cashu/cashu-ts/layer3";
 import { decryptBackup, encryptBackup } from "./backup";
+import { WalletGuide } from "./WalletGuide";
+import { useTheme } from "./theme";
 
 const repo = new Layer3IndexedDbRepository();
 const defaultMint =
@@ -252,6 +257,7 @@ function ActivityRow({
 }
 
 export function App() {
+  const { preference, theme, changePreference } = useTheme();
   const [mintUrl, setMintUrl] = useState(initialMint),
     [mintInput, setMintInput] = useState(initialMint);
   const [manager, setManager] = useState<Layer3Manager | null>(null),
@@ -521,14 +527,30 @@ export function App() {
             </button>
           ))}
         </nav>
-        <span className="local-tag">
-          <span className={`status-dot ${canSpend ? "" : "offline"}`} />
-          {connecting
-            ? "Connecting"
-            : canSpend
-              ? "Mint connected"
-              : "Mint offline"}
-        </span>
+        <div className="header-tools">
+          <span className="local-tag">
+            <span className={`status-dot ${canSpend ? "" : "offline"}`} />
+            {connecting
+              ? "Connecting"
+              : canSpend
+                ? "Mint connected"
+                : "Mint offline"}
+          </span>
+          <button
+            className="icon-button theme-toggle"
+            aria-label={theme === "dark" ? "Use light mode" : "Use night mode"}
+            title={theme === "dark" ? "Use light mode" : "Use night mode"}
+            onClick={() =>
+              changePreference(theme === "dark" ? "light" : "dark")
+            }
+          >
+            {theme === "dark" ? (
+              <Sun size={19} aria-hidden="true" />
+            ) : (
+              <Moon size={19} aria-hidden="true" />
+            )}
+          </button>
+        </div>
       </header>
       <main>
         {(connectionError || (error && !dialog)) && (
@@ -569,14 +591,27 @@ export function App() {
                 Your sats stay backed by a live HTLC.
               </p>
             </div>
+            <WalletGuide />
             <section className="balance-card" aria-label="Wallet balance">
               <div className="balance-main">
                 <div className="balance-label">
                   <span className="eyebrow">AVAILABLE TO SPEND</span>
-                  <ShieldCheck size={19} />
+                  <span
+                    className="balance-status"
+                    title={
+                      canSpend
+                        ? "Backing status verified with the mint"
+                        : "Connect to verify backing status"
+                    }
+                  >
+                    <ShieldCheck size={15} aria-hidden="true" />
+                    {canSpend ? "Verified" : "Unverified"}
+                  </span>
                 </div>
                 <div className="balance-number" data-testid="balance">
-                  {view?.verified ? format(usableBalance || 0) : "—"}
+                  <strong>
+                    {view?.verified ? format(usableBalance || 0) : "—"}
+                  </strong>
                   <span>sats</span>
                 </div>
                 <p className="balance-caption">
@@ -914,6 +949,36 @@ export function App() {
               </p>
             </div>
             <div className="settings-grid">
+              <section className="settings-card appearance-card">
+                <h2>Appearance</h2>
+                <p className="muted">
+                  Choose light or night mode, or follow your device’s setting.
+                </p>
+                <fieldset className="theme-options">
+                  <legend className="sr-only">Color theme</legend>
+                  {(
+                    [
+                      { value: "light", label: "Light", icon: Sun },
+                      { value: "dark", label: "Night", icon: Moon },
+                      { value: "system", label: "System", icon: Monitor },
+                    ] as const
+                  ).map(({ value, label, icon: Icon }) => (
+                    <label key={value} className="theme-option">
+                      <input
+                        type="radio"
+                        name="theme"
+                        value={value}
+                        checked={preference === value}
+                        onChange={() => changePreference(value)}
+                      />
+                      <span>
+                        <Icon size={18} aria-hidden="true" />
+                        {label}
+                      </span>
+                    </label>
+                  ))}
+                </fieldset>
+              </section>
               <section className="settings-card">
                 <h2>Your mint</h2>
                 <p className="muted">

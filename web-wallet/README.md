@@ -36,6 +36,9 @@ over HTTPS and use an HTTPS mint; browsers block mixed-content requests.
 
 ## Use
 
+- **Wallet guide:** a dismissible carousel explains expiry, mint custody, private
+  transfers, and settlement. Dismissal is remembered in this browser; choose
+  **How cashu³ works** above the balance to read it again.
 - **Add sats:** generates and durably saves a backing preimage, requests a HODL
   invoice with its hash, and displays the invoice/QR. Pay from a Lightning wallet.
   Once the payment is held (`ACCEPTED`), the wallet mints denomination proofs.
@@ -58,6 +61,9 @@ over HTTPS and use an HTTPS mint; browsers block mixed-content requests.
   An explicit pending response triggers bounded automatic checks of the exact
   saved request. If completion takes longer, the payment stays in Pending
   operations with its inputs reserved and a Retry action; it is shown as pending.
+- **Appearance:** use the header’s sun/moon button to switch modes, or choose
+  Light, Night, or System in Settings. The preference is saved in this browser;
+  System follows your device’s color scheme.
 - **Settings:** exports/restores password-encrypted backups containing proofs,
   backing preimages, pending request secrets, and the outgoing token history.
   Restore requires an empty wallet in a new browser profile. A snapshot backup
