@@ -18,6 +18,7 @@ def isolated_configuration(tmp_path, monkeypatch):
         "CASHU_MINT_DATA",
         "CASHU_MINT_HOST",
         "CASHU_MINT_PORT",
+        "CASHU_ADMIN_TOKEN",
         "CASHU_LND_ENDPOINT",
         "CASHU_LND_CERT",
         "CASHU_LND_MACAROON",
@@ -70,6 +71,37 @@ def test_cli_overrides_environment_which_overrides_dotenv(tmp_path, monkeypatch)
     args = parse_args(["--backend", "fake", "--port", "6338"])
     assert args.backend == "fake"
     assert args.port == 6338
+
+
+def test_operator_secret_is_optional_and_environment_overrides_dotenv(
+    tmp_path, monkeypatch
+):
+    assert parse_args([]).admin_token is None
+    (tmp_path / ".env").write_text("CASHU_ADMIN_TOKEN=file-secret\n")
+    assert parse_args([]).admin_token == "file-secret"
+    monkeypatch.setenv("CASHU_ADMIN_TOKEN", "environment-secret")
+    assert parse_args([]).admin_token == "environment-secret"
+
+
+def test_mint_command_passes_operator_secret_to_the_api(tmp_path, monkeypatch):
+    from cashu.server import main
+
+    monkeypatch.setenv("CASHU_ADMIN_TOKEN", "operator-test-secret")
+    monkeypatch.setattr("sys.argv", ["mint", "--data", str(tmp_path / "mint")])
+
+    def run(app, **kwargs):
+        with TestClient(app) as http:
+            assert http.post("/v1/admin/fund", json={"amount": 1000}).status_code == 401
+            response = http.post(
+                "/v1/admin/fund",
+                json={"amount": 1000},
+                headers={"Authorization": "Bearer operator-test-secret"},
+            )
+            assert response.status_code == 200
+            assert response.json()["amount"] == 1000
+
+    monkeypatch.setattr("cashu.server.uvicorn.run", run)
+    main()
 
 
 @pytest.mark.parametrize(

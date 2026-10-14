@@ -152,6 +152,7 @@ class SdkStub:
         self.sync_error = False
         self.pages = []
         self.cltv_delta = SPARK_MAINNET_MIN_FINAL_CLTV_EXPIRY_DELTA
+        self.receives = []
 
     async def sync_wallet(self, request):
         if self.sync_error:
@@ -167,17 +168,23 @@ class SdkStub:
     async def receive_payment(self, request):
         method = request.payment_method
         assert isinstance(method, breez.ReceivePaymentMethod.BOLT11_INVOICE)
-        assert method.payment_hash is not None
+        self.receives.append(method)
+        payment_hash = method.payment_hash or os.urandom(32).hex()
         invoice = FakeBackend._invoice(
             method.amount_sats,
-            method.payment_hash,
+            payment_hash,
             method.expiry_secs,
             method.description,
         )
         decoded = decode(invoice)
-        decoded.tags.add(TagChar.min_final_cltv_expiry, self.cltv_delta)
+        if method.payment_hash is None:
+            decoded.currency = "bc"
+        decoded.tags.add(
+            TagChar.min_final_cltv_expiry,
+            self.cltv_delta if method.payment_hash is not None else 18,
+        )
         invoice = encode(decoded, private_key="11" * 32)
-        self.invoices[method.payment_hash] = invoice
+        self.invoices[payment_hash] = invoice
         return breez.ReceivePaymentResponse(payment_request=invoice, fee=0)
 
     def fund(self, payment_hash, deadline=None):
@@ -263,6 +270,116 @@ async def held(spark, amount=1000, expiry=3600):
     assert invoice.state == InvoiceState.open
     payment = sdk.fund(payment_hash)
     return preimage, payment_hash, payment
+
+
+@pytest.mark.parametrize("fee", [0, 2])
+def test_operator_funding_uses_an_ordinary_invoice_without_creating_ecash(
+    spark, tmp_path, monkeypatch, fee
+):
+    backend, sdk = spark
+    receive = sdk.receive_payment
+
+    async def receive_with_fee(request):
+        response = await receive(request)
+        response.fee = fee
+        return response
+
+    monkeypatch.setattr(sdk, "receive_payment", receive_with_fee)
+    mint = Mint(tmp_path / "mint.sqlite3", b"m" * 32, backend)
+    with TestClient(
+        create_app(mint, recovery=False, admin_token="test-operator-secret")
+    ) as http:
+        response = http.post(
+            "/v1/admin/fund",
+            json={"amount": 10000, "expiry": 600},
+            headers={"Authorization": "Bearer test-operator-secret"},
+        )
+        assert response.status_code == 200
+        invoice = response.json()
+        decoded = decode(invoice["request"])
+        assert decoded.amount_msat == 10000000
+        assert decoded.payment_hash == invoice["payment_hash"]
+        assert decoded.expiry == 600
+        assert invoice["expiry"] == decoded.date + decoded.expiry
+        assert invoice["fee"] == fee
+        assert decoded.min_final_cltv_expiry == 18  # Ordinary SSP policy, not HODL.
+        assert sdk.receives[0].payment_hash is None
+        assert sdk.receives[0].amount_sats == 10000
+        assert sdk.receives[0].description == "cashu3 operator liquidity"
+        assert not sdk.claims and not sdk.sends
+        assert http.get("/v1/htlcs/pending").json()["htlcs"] == []
+    for db, table in ((backend.db, "invoices"), (mint.db, "quotes")):
+        with db.read() as conn:
+            assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("fee", [-1, 10000, True, "0"])
+async def test_operator_funding_rejects_invalid_sdk_receive_fees(
+    spark, monkeypatch, fee
+):
+    backend, sdk = spark
+    receive = sdk.receive_payment
+
+    async def invalid_fee(request):
+        response = await receive(request)
+        response.fee = fee
+        return response
+
+    monkeypatch.setattr(sdk, "receive_payment", invalid_fee)
+    with pytest.raises(BackendError, match="invalid receive fees"):
+        await backend.create_funding_invoice(10000)
+
+
+@pytest.mark.parametrize("invalid", ["amount", "network", "expiry", "encoding"])
+async def test_operator_funding_rejects_invalid_sdk_invoices(
+    spark, monkeypatch, invalid
+):
+    backend, sdk = spark
+    receive = sdk.receive_payment
+
+    async def invalid_invoice(request):
+        response = await receive(request)
+        invoice = decode(response.payment_request)
+        if invalid == "amount":
+            invoice.amount_msat += 1000
+        elif invalid == "network":
+            invoice.currency = "bcrt"
+        elif invalid == "expiry":
+            invoice.date -= 7200
+        response.payment_request = (
+            "secret invalid invoice"
+            if invalid == "encoding"
+            else encode(invoice, private_key="11" * 32)
+        )
+        return response
+
+    monkeypatch.setattr(sdk, "receive_payment", invalid_invoice)
+    with pytest.raises(BackendError) as error:
+        await backend.create_funding_invoice(10000)
+    assert "secret" not in str(error.value)
+
+
+def test_operator_funding_sdk_errors_do_not_expose_credentials(
+    spark, tmp_path, monkeypatch
+):
+    backend, sdk = spark
+
+    async def fail(request):
+        raise RuntimeError("secret SDK credentials and wallet mnemonic")
+
+    monkeypatch.setattr(sdk, "receive_payment", fail)
+    mint = Mint(tmp_path / "mint.sqlite3", b"m" * 32, backend)
+    with TestClient(
+        create_app(mint, recovery=False, admin_token="test-operator-secret")
+    ) as http:
+        response = http.post(
+            "/v1/admin/fund",
+            json={"amount": 10000},
+            headers={"Authorization": "Bearer test-operator-secret"},
+        )
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Spark funding invoice creation failed"}
+    assert "secret" not in response.text
 
 
 async def test_funding_is_accepted_without_revealing_preimage(spark):

@@ -51,6 +51,20 @@ class QuoteResponse(WireModel):
     keyset_id: KeysetId
 
 
+class OperatorFundingRequest(WireModel):
+    amount: Amount
+    expiry: Annotated[int, Field(strict=True, ge=60, le=86400)] = 3600
+
+
+class OperatorFundingResponse(WireModel):
+    amount: Amount
+    unit: Literal["sat"] = "sat"
+    request: str
+    payment_hash: Hex32
+    expiry: Annotated[int, Field(ge=0)]
+    fee: Sats
+
+
 class PendingHTLC(WireModel):
     payment_hash: Hex32
     amount: Amount

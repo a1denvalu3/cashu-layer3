@@ -23,7 +23,7 @@ from .lightning import (
     PaymentState,
     invoice_details,
 )
-from .models import InvoiceState
+from .models import InvoiceState, OperatorFundingRequest, OperatorFundingResponse
 
 # Verified against unpaid HODL invoices from the SDK's default mainnet SSP on
 # 2026-10-12. This is the invoice's minimum final-hop delta, not the funded
@@ -226,6 +226,50 @@ class SparkBackend(HoldInvoiceBackend):
             raise BackendError(
                 "Spark payment lookup failed; retry to reconcile"
             ) from None
+
+    async def create_funding_invoice(
+        self, amount: int, expiry: int = 3600
+    ) -> OperatorFundingResponse:
+        parameters = OperatorFundingRequest(amount=amount, expiry=expiry)
+        async with self._invoice_lock:
+            sdk = await self._ensure_sdk()
+            try:
+                response = await sdk.receive_payment(
+                    breez.ReceivePaymentRequest(
+                        payment_method=breez.ReceivePaymentMethod.BOLT11_INVOICE(
+                            description="cashu3 operator liquidity",
+                            amount_sats=parameters.amount,
+                            expiry_secs=parameters.expiry,
+                            # No supplied hash: the SDK owns the preimage and claims
+                            # this payment normally, independently of ecash holds.
+                            payment_hash=None,
+                        )
+                    )
+                )
+                request = response.payment_request
+                payment_hash, invoice_amount = invoice_details(request)
+                decoded = decode(request)
+                if invoice_amount != amount:
+                    raise BackendError("Spark funding invoice amount mismatch")
+                currency = "bc" if self.network == "mainnet" else "bcrt"
+                if decoded.currency != currency:
+                    raise BackendError("Spark funding invoice network mismatch")
+                expires_at = decoded.date + decoded.expiry
+                if expires_at <= int(time.time()):
+                    raise BackendError("Spark funding invoice has already expired")
+                if type(response.fee) is not int or not 0 <= response.fee < amount:
+                    raise BackendError("Spark funding invoice has invalid receive fees")
+                return OperatorFundingResponse(
+                    amount=amount,
+                    request=request,
+                    payment_hash=payment_hash,
+                    expiry=expires_at,
+                    fee=response.fee,
+                )
+            except BackendError:
+                raise
+            except Exception:
+                raise BackendError("Spark funding invoice creation failed") from None
 
     async def create_hold_invoice(
         self, amount: int, payment_hash: str, expiry: int

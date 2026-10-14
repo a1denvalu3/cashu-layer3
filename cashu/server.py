@@ -50,6 +50,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--port", type=int, default=configuration.get("CASHU_MINT_PORT") or "3338"
     )
+    parser.set_defaults(admin_token=configuration.get("CASHU_ADMIN_TOKEN") or None)
     parser.add_argument(
         "--lnd-endpoint", default=configuration.get("CASHU_LND_ENDPOINT")
     )
@@ -204,7 +205,11 @@ def main() -> None:
             "The existing database and seed must be retained for the old protocol."
         ) from None
     print(f"Mint backend: {args.backend}", file=sys.stderr)
-    uvicorn.run(create_app(mint, report_balances=True), host=args.host, port=args.port)
+    uvicorn.run(
+        create_app(mint, report_balances=True, admin_token=args.admin_token),
+        host=args.host,
+        port=args.port,
+    )
 
 
 if __name__ == "__main__":

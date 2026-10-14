@@ -1,11 +1,13 @@
 import asyncio
 import logging
+import secrets
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from fastapi import FastAPI, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from .db import BackendError, MintError
 from .mint import Mint
@@ -19,6 +21,8 @@ from .models import (
     MeltRequest,
     MeltResponse,
     MintRequest,
+    OperatorFundingRequest,
+    OperatorFundingResponse,
     PendingHTLCsResponse,
     QuoteRequest,
     QuoteResponse,
@@ -28,7 +32,10 @@ from .models import (
 
 
 def create_app(
-    mint: Mint, recovery: bool = True, report_balances: bool = False
+    mint: Mint,
+    recovery: bool = True,
+    report_balances: bool = False,
+    admin_token: str | None = None,
 ) -> FastAPI:
     async def reconcile():
         while True:
@@ -91,6 +98,32 @@ def create_app(
         return JSONResponse(
             {"detail": "invalid cryptographic encoding or invoice"}, status_code=400
         )
+
+    bearer = HTTPBearer(auto_error=False)
+
+    async def authorize_operator(
+        credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
+    ) -> None:
+        if not admin_token:
+            raise HTTPException(status_code=404, detail="Not Found")
+        if credentials is None or not secrets.compare_digest(
+            credentials.credentials.encode(), admin_token.encode()
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid operator credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+    @app.post(
+        "/v1/admin/fund",
+        response_model=OperatorFundingResponse,
+        include_in_schema=False,
+        dependencies=[Depends(authorize_operator)],
+    )
+    async def fund_mint(request: OperatorFundingRequest, response: Response):
+        response.headers["Cache-Control"] = "no-store"
+        return await mint.backend.create_funding_invoice(request.amount, request.expiry)
 
     @app.get("/v1/info")
     async def info():

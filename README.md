@@ -326,6 +326,47 @@ The live runner verifies held funding, private swaps, partial and combined
 melts with change, delayed claims, and full-redemption settlement against that
 fixture.
 
+### Fund the mint's backend wallet
+
+Set `CASHU_ADMIN_TOKEN` in the mint's environment or `.env` and restart the mint.
+Generate a dedicated operator token with `openssl rand -hex 32`. For the VPS
+systemd setup, add it to `/etc/cashu3/mint.env` and run
+`sudo systemctl restart cashu3-mint`.
+
+The operator-only `POST /v1/admin/fund` endpoint creates an **ordinary Lightning
+invoice** for the requested sats amount using whichever backend the mint is
+running. Paying it funds the backend's spendable balance for outgoing payouts.
+It does not issue ecash, create a backing HTLC, or require a user-supplied
+payment hash. Spark reuses the mint's SDK connection and storage; LND creates a
+standard invoice through its existing REST connection. The fake backend returns
+a simulated, payable invoice for testing. Every backend implements the same
+`create_funding_invoice` interface; no second wallet process is needed.
+
+Export the same operator token in the shell making the request:
+
+```bash
+export CASHU_ADMIN_TOKEN='your-generated-operator-token'
+curl --fail-with-body -sS https://mint.example.com/v1/admin/fund \
+  -H "Authorization: Bearer $CASHU_ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data '{"amount":100000,"expiry":3600}'
+```
+
+The JSON response contains `request` (the BOLT11 invoice to pay), `amount`,
+`unit`, `payment_hash`, `expiry` (a Unix timestamp), and the backend's receive
+`fee` in sats. Spark receive fees may apply; LND and fake report zero. To print
+only the invoice, pipe the response through `jq -r '.request'`. `expiry` in the
+request is optional and defaults to 3,600 seconds; its allowed range is
+60–86,400 seconds.
+`amount` must be a positive whole number of sats within the protocol's monetary
+limit.
+
+The route is excluded from OpenAPI/Swagger and the wallet UI. It returns 404
+when `CASHU_ADMIN_TOKEN` is unset and requires a bearer token when enabled.
+Use HTTPS for remote requests; on the VPS itself,
+`http://127.0.0.1:3338/v1/admin/fund` also works. Keep the
+operator token out of URLs and frontend configuration.
+
 ## Wallet commands
 
 The default mint is `http://127.0.0.1:3338` and the default wallet database is

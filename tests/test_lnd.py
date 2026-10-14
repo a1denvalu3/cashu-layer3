@@ -1,14 +1,117 @@
 import base64
 import hashlib
+import json
 import time
 
 import httpx
 import pytest
+from bolt11 import decode, encode
 from conftest import PREIMAGE
+from fastapi.testclient import TestClient
 
+from cashu.api import create_app
 from cashu.db import BackendError
 from cashu.lightning import FakeBackend, LndRestBackend, PaymentState
+from cashu.mint import Mint
 from cashu.models import InvoiceState
+
+
+def test_lnd_operator_funding_uses_standard_invoices_not_holds(tmp_path):
+    payment_hash = hashlib.sha256(PREIMAGE).hexdigest()
+    invoice = FakeBackend._invoice(10000, payment_hash, 600, "operator funding")
+    calls = []
+
+    def respond(request):
+        calls.append((request.method, request.url.path))
+        assert request.method == "POST"
+        assert request.url.path == "/v1/invoices"
+        assert json.loads(request.content) == {
+            "value": "10000",
+            "expiry": "600",
+            "memo": "cashu3 operator liquidity",
+        }
+        return httpx.Response(
+            200,
+            json={
+                "r_hash": base64.b64encode(bytes.fromhex(payment_hash)).decode(),
+                "payment_request": invoice,
+                "add_index": "1",
+            },
+        )
+
+    macaroon = tmp_path / "admin.macaroon"
+    macaroon.write_bytes(b"test-only macaroon")
+    backend = LndRestBackend(
+        "https://lnd.test", macaroon, transport=httpx.MockTransport(respond)
+    )
+    mint = Mint(tmp_path / "mint.sqlite3", b"m" * 32, backend)
+    with TestClient(
+        create_app(mint, recovery=False, admin_token="test-operator-secret")
+    ) as http:
+        response = http.post(
+            "/v1/admin/fund",
+            json={"amount": 10000, "expiry": 600},
+            headers={"Authorization": "Bearer test-operator-secret"},
+        )
+        assert response.status_code == 200
+        assert response.json() == {
+            "amount": 10000,
+            "unit": "sat",
+            "request": invoice,
+            "payment_hash": payment_hash,
+            "expiry": decode(invoice).date + 600,
+            "fee": 0,
+        }
+    assert calls == [("POST", "/v1/invoices")]
+    with mint.db.read() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM quotes").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize(
+    "invalid", ["missing", "hash", "amount", "expiry", "encoding", "provider_error"]
+)
+@pytest.mark.asyncio
+async def test_lnd_operator_funding_rejects_bad_provider_data_without_leaking_it(
+    tmp_path, invalid
+):
+    payment_hash = hashlib.sha256(PREIMAGE).hexdigest()
+    invoice = FakeBackend._invoice(
+        10001 if invalid == "amount" else 10000,
+        payment_hash,
+        600,
+        "operator funding",
+    )
+    if invalid == "expiry":
+        decoded = decode(invoice)
+        decoded.date -= 7200
+        invoice = encode(decoded, private_key="11" * 32)
+    body = {
+        "r_hash": base64.b64encode(bytes.fromhex(payment_hash)).decode(),
+        "payment_request": invoice,
+    }
+    if invalid == "missing":
+        del body["r_hash"]
+    elif invalid == "hash":
+        body["r_hash"] = base64.b64encode(bytes.fromhex("11" * 32)).decode()
+    elif invalid == "encoding":
+        body["payment_request"] = "secret invalid provider invoice"
+
+    def respond(request):
+        if invalid == "provider_error":
+            return httpx.Response(503, json={"error": "secret backend credentials"})
+        return httpx.Response(200, json=body)
+
+    macaroon = tmp_path / "admin.macaroon"
+    macaroon.write_bytes(b"test-only macaroon")
+    backend = LndRestBackend(
+        "https://lnd.test", macaroon, transport=httpx.MockTransport(respond)
+    )
+    try:
+        with pytest.raises(BackendError) as error:
+            await backend.create_funding_invoice(10000)
+        assert "secret" not in str(error.value)
+    finally:
+        await backend.close()
 
 
 @pytest.mark.asyncio
