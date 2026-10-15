@@ -34,47 +34,49 @@ function CashIllustration() {
       className="landing-art"
       aria-label="A frozen Lightning deposit supports ecash that can move privately between people."
     >
-      <div className="art-backdrop" aria-hidden="true">
-        <div className="art-grid" />
-        <div className="art-orbit" />
-      </div>
-      <div className="art-held">
-        <span className="art-lightning">
-          <Zap size={16} aria-hidden="true" />
-        </span>
-        1,000 sat deposit <span className="art-held-status">FROZEN</span>
-      </div>
-      <div className="art-connection" aria-hidden="true" />
-      <div className="art-note">
-        <div className="art-note-top">
-          <span>
-            tmp<span>.cash</span>
+      <div className="art-scene">
+        <div className="art-backdrop" aria-hidden="true">
+          <div className="art-grid" />
+          <div className="art-orbit" />
+        </div>
+        <div className="art-held">
+          <span className="art-lightning">
+            <Zap size={16} aria-hidden="true" />
           </span>
-          <TmpCashMark size={25} strokeWidth={1.3} aria-hidden="true" />
+          1,000 sat deposit <span className="art-held-status">FROZEN</span>
         </div>
-        <div className="art-note-value">
-          750<span>sats</span>
+        <div className="art-connection" aria-hidden="true" />
+        <div className="art-note">
+          <div className="art-note-top">
+            <span>
+              tmp<span>.cash</span>
+            </span>
+            <TmpCashMark size={25} strokeWidth={1.3} aria-hidden="true" />
+          </div>
+          <div className="art-note-value">
+            750<span>sats</span>
+          </div>
+          <div className="art-note-bottom">
+            <span>ECASH YOU CAN SEND</span>
+            <Layers3 size={18} aria-hidden="true" />
+          </div>
+          <div className="art-note-seal" aria-hidden="true">
+            <TmpCashMark size={67} strokeWidth={0.7} />
+          </div>
         </div>
-        <div className="art-note-bottom">
-          <span>ECASH YOU CAN SEND</span>
-          <Layers3 size={18} aria-hidden="true" />
+        <div className="art-fragment">
+          <div>
+            <span>SENT TO A FRIEND</span>
+            <ArrowUpRight size={17} aria-hidden="true" />
+          </div>
+          <strong>
+            250 <span>sats</span>
+          </strong>
+          <span className="art-fragment-rule" />
+          <span>
+            <Fingerprint size={14} aria-hidden="true" /> Owner hidden from mint
+          </span>
         </div>
-        <div className="art-note-seal" aria-hidden="true">
-          <TmpCashMark size={67} strokeWidth={0.7} />
-        </div>
-      </div>
-      <div className="art-fragment">
-        <div>
-          <span>SENT TO A FRIEND</span>
-          <ArrowUpRight size={17} aria-hidden="true" />
-        </div>
-        <strong>
-          250 <span>sats</span>
-        </strong>
-        <span className="art-fragment-rule" />
-        <span>
-          <Fingerprint size={14} aria-hidden="true" /> Owner hidden from mint
-        </span>
       </div>
       <figcaption>
         <LockKeyhole size={14} aria-hidden="true" /> Deposit frozen. Transfers

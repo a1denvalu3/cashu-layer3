@@ -87,6 +87,8 @@
 }
 body {
   margin: 0;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 body:has(.modal[open]) {
   overflow: hidden;
@@ -105,7 +107,7 @@ button {
   cursor: pointer;
   color: inherit;
 }
-button svg {
+svg {
   flex-shrink: 0;
 }
 button:disabled {
@@ -136,8 +138,10 @@ a {
   color: inherit;
 }
 .app-shell {
+  --shell-gutter: 48px;
   max-width: 1184px;
-  padding: 0 48px;
+  padding-left: max(var(--shell-gutter), env(safe-area-inset-left, 0px));
+  padding-right: max(var(--shell-gutter), env(safe-area-inset-right, 0px));
   margin: auto;
 }
 .header {
@@ -242,6 +246,7 @@ nav button:hover {
 }
 main {
   min-height: calc(100vh - 202px);
+  min-height: calc(100dvh - 202px);
 }
 .page-intro {
   display: flex;
@@ -291,11 +296,13 @@ p {
   animation: arrive 0.5s ease both;
 }
 .balance-main {
+  container-type: inline-size;
   padding: 29px 35px 30px;
   min-width: 0;
 }
 .balance-label {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -333,6 +340,9 @@ p {
 .balance-number > strong {
   min-width: 0;
   font-weight: inherit;
+  font-size: min(1em, calc(100cqi / var(--amount-characters, 1) * 1.8));
+  letter-spacing: -0.05em;
+  white-space: nowrap;
 }
 .balance-number > span {
   font-size: 19px;
@@ -363,6 +373,7 @@ p {
     transform 0.15s,
     background 0.15s;
   text-decoration: none;
+  max-width: 100%;
 }
 .button:active:not(:disabled) {
   transform: translateY(1px);
@@ -640,6 +651,8 @@ p {
   gap: 12px;
 }
 .backing {
+  container-type: inline-size;
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--paper);
@@ -679,8 +692,9 @@ p {
 }
 .backing-amount {
   margin: 22px 0 16px;
-  font-size: 28px;
+  font-size: min(28px, calc(100cqi / var(--amount-characters, 1) * 1.8));
   letter-spacing: -1px;
+  overflow-wrap: anywhere;
 }
 .backing-amount > span {
   font-size: 12px;
@@ -740,16 +754,27 @@ p {
   font-size: 10px;
 }
 .activity-value {
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   gap: 4px;
   text-align: right;
   min-width: 100px;
   flex-shrink: 0;
+  overflow-wrap: anywhere;
 }
 .activity-value strong {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: baseline;
+  column-gap: 4px;
   font-size: 14px;
   font-weight: 500;
+}
+.activity-amount {
+  font-size: min(1em, calc(100cqi / var(--amount-characters, 1) * 1.8));
+  white-space: nowrap;
 }
 .activity-value > span {
   font-size: 9px;
@@ -769,7 +794,8 @@ p {
   flex-wrap: wrap;
 }
 .pending-row > div {
-  flex: 1;
+  flex: 1 1 180px;
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 .pending-row strong {
@@ -819,6 +845,7 @@ p {
   grid-column: 1 / -1;
 }
 .theme-options {
+  min-width: 0;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
@@ -935,10 +962,13 @@ footer .text-button {
   border-radius: 17px;
   padding: 33px;
   width: 440px;
-  max-width: calc(100vw - 30px);
-  max-height: calc(100dvh - 45px);
+  max-width: calc(100% - 30px);
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
   box-shadow: 0 30px 120px var(--shadow);
-  overflow-x: hidden;
+  overflow: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
 }
 .modal::backdrop {
   background: var(--backdrop);
@@ -980,6 +1010,8 @@ textarea,
 select {
   display: block;
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--input);
@@ -1121,7 +1153,7 @@ input[type="file"] {
 }
 @media (max-width: 1000px) {
   .app-shell {
-    padding: 0 30px;
+    --shell-gutter: 30px;
   }
   .header {
     gap: 20px;
@@ -1143,9 +1175,48 @@ input[type="file"] {
     grid-template-columns: 1fr;
   }
 }
+@media (max-width: 900px) {
+  .app-shell > .header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px 10px;
+    padding-block: 16px 0;
+  }
+  .app-shell .header-tools {
+    display: contents;
+  }
+  .app-shell .header .theme-toggle {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+  }
+  .app-shell .local-tag {
+    grid-column: 2;
+    grid-row: 2;
+    margin: 0;
+    font-size: 10px;
+  }
+  .app-shell .header nav {
+    grid-column: 1;
+    grid-row: 2;
+    min-width: 0;
+    margin: 0;
+    gap: 18px;
+  }
+  .app-shell nav button {
+    min-height: 40px;
+    padding: 7px 3px;
+    font-size: 11px;
+    border-radius: 0;
+  }
+  .app-shell nav button.nav-active {
+    background: none;
+    border-bottom: 2px solid var(--accent-text);
+  }
+}
 @media (max-width: 740px) {
   .app-shell {
-    padding: 0 21px;
+    --shell-gutter: 21px;
   }
   .header {
     min-height: 100px;
@@ -1213,6 +1284,7 @@ input[type="file"] {
     align-items: center;
     gap: 10px;
     text-align: left;
+    flex-wrap: wrap;
   }
   .cash-mark {
     display: none;
@@ -1282,7 +1354,7 @@ input[type="file"] {
   }
   .activity-row {
     display: grid;
-    grid-template-columns: 39px minmax(0, 1fr) auto;
+    grid-template-columns: 39px minmax(0, 1fr) minmax(0, 0.8fr);
     gap: 9px;
   }
   .activity-row > .transaction-icon {
@@ -1304,7 +1376,7 @@ input[type="file"] {
     gap: 2px;
   }
   .activity-value {
-    min-width: 76px;
+    min-width: 0;
   }
   .activity-name strong {
     font-size: 11px;
@@ -1330,7 +1402,7 @@ input[type="file"] {
 }
 @media (max-width: 380px) {
   .app-shell {
-    padding: 0 15px;
+    --shell-gutter: 15px;
   }
   .local-tag {
     font-size: 9px;
@@ -1350,13 +1422,34 @@ input[type="file"] {
     font-size: 9px;
   }
   .wallet-actions .button {
-    gap: 5px;
+    flex-direction: column;
+    gap: 6px;
   }
   .balance-side {
     flex-wrap: wrap;
   }
   .modal {
     padding: 28px 22px;
+  }
+}
+@media (max-width: 319px) {
+  .app-shell .header nav {
+    grid-column: 1 / -1;
+  }
+  .app-shell .local-tag {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    padding-bottom: 12px;
+  }
+}
+@media (pointer: coarse) {
+  .app-shell input,
+  .app-shell textarea,
+  .app-shell select {
+    font-size: 16px;
+  }
+  .app-shell .amount-input input {
+    font-size: 32px;
   }
 }
 

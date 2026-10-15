@@ -5,9 +5,11 @@
   --landing-accent: #d2ec63;
 }
 .landing-shell {
+  --shell-gutter: 48px;
   max-width: 1232px;
   margin: auto;
-  padding: 0 48px;
+  padding-left: max(var(--shell-gutter), env(safe-area-inset-left, 0px));
+  padding-right: max(var(--shell-gutter), env(safe-area-inset-right, 0px));
 }
 .landing a {
   text-decoration: none;
@@ -54,6 +56,7 @@
 }
 .landing .landing-open {
   gap: 20px;
+  white-space: nowrap;
 }
 .landing-open svg {
   transition: transform 180ms ease;
@@ -63,7 +66,7 @@
 }
 .landing .landing-hero {
   display: grid;
-  grid-template-columns: 1.15fr 1fr;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
   align-items: center;
   gap: 40px;
   padding: 78px 0 68px;
@@ -98,6 +101,7 @@
 }
 .hero-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 26px;
   margin-top: 29px;
@@ -124,15 +128,24 @@
   margin-top: 22px;
 }
 .landing-art {
+  container-type: inline-size;
+  display: grid;
+  gap: 24px;
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  min-width: 0;
+}
+.art-scene {
   position: relative;
   isolation: isolate;
-  margin: 0;
-  min-width: 0;
-  height: 450px;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 0 14px;
 }
 .art-backdrop {
   position: absolute;
-  inset: 0 -12px 24px;
+  inset: 0;
   overflow: hidden;
   z-index: -1;
 }
@@ -159,9 +172,9 @@
   border-radius: 50%;
 }
 .art-held {
-  position: absolute;
-  top: 22px;
-  left: 15%;
+  position: relative;
+  align-self: center;
+  margin-bottom: 48px;
   display: flex;
   align-items: center;
   gap: 9px;
@@ -190,17 +203,16 @@
 }
 .art-connection {
   position: absolute;
-  top: 72px;
+  top: 62px;
   left: 46%;
   height: 45px;
   border-left: 1px dashed var(--accent-text);
 }
 .art-note {
-  position: absolute;
-  top: 111px;
-  left: 5%;
-  width: 88%;
-  padding: 21px 25px 17px;
+  position: relative;
+  width: 84%;
+  margin: 0 auto;
+  padding: clamp(16px, 5cqi, 25px);
   border: 1px solid #b9cc65;
   border-radius: 13px;
   background: #d2ec63;
@@ -229,7 +241,7 @@
   font-weight: 400;
 }
 .art-note-value {
-  font-size: clamp(60px, 7.5vw, 91px);
+  font-size: clamp(60px, 19cqi, 91px);
   line-height: 1.3;
   letter-spacing: -6px;
   position: relative;
@@ -264,11 +276,10 @@
   color: #acbf50;
 }
 .art-fragment {
-  position: absolute;
-  top: 280px;
-  right: 0;
-  width: 222px;
-  padding: 17px 20px;
+  position: relative;
+  margin: -18px 5% 0 auto;
+  width: clamp(186px, 58cqi, 222px);
+  padding: 14px 17px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--paper);
@@ -311,11 +322,9 @@
   justify-content: flex-start;
 }
 .landing-art figcaption {
-  position: absolute;
-  bottom: 0;
-  left: 7%;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 7px;
   color: var(--muted);
   font:
@@ -433,13 +442,14 @@
 }
 .sats-example {
   display: grid;
-  grid-template-columns: 0.9fr 1.35fr;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.35fr);
   border: 1px solid var(--line);
   border-radius: 18px;
   overflow: hidden;
   background: var(--paper);
 }
 .example-intro {
+  min-width: 0;
   background: var(--soft-green);
   padding: 39px;
   border-right: 1px solid var(--line);
@@ -543,6 +553,8 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 6px;
   min-height: 44px;
   border: 1px solid var(--line);
   border-radius: 7px;
@@ -878,7 +890,7 @@
 }
 @media (max-width: 1000px) {
   .landing-shell {
-    padding: 0 30px;
+    --shell-gutter: 30px;
   }
   .landing .landing-hero {
     gap: 20px;
@@ -890,23 +902,6 @@
   }
   .hero-copy > p {
     font-size: 13px;
-  }
-  .landing-art {
-    height: 410px;
-  }
-  .art-note {
-    padding: 19px;
-  }
-  .art-note-value {
-    font-size: 68px;
-  }
-  .art-fragment {
-    top: 257px;
-    width: 196px;
-    padding: 14px 17px;
-  }
-  .art-held {
-    left: 5%;
   }
   .landing-steps {
     gap: 20px;
@@ -924,9 +919,25 @@
     gap: 50px;
   }
 }
+@media (max-width: 900px) {
+  .landing .landing-hero {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 32px;
+  }
+  .hero-copy > p {
+    max-width: 460px;
+  }
+  .sats-example {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .example-intro {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+}
 @media (max-width: 740px) {
   .landing-shell {
-    padding: 0 21px;
+    --shell-gutter: 21px;
   }
   .landing .landing-header {
     min-height: 87px;
@@ -977,26 +988,6 @@
   .landing-art {
     width: min(100%, 430px);
     margin: 10px auto 0;
-    height: 425px;
-  }
-  .art-held {
-    left: 12%;
-  }
-  .art-note {
-    left: 7%;
-    width: 84%;
-  }
-  .art-note-value {
-    font-size: 76px;
-  }
-  .art-fragment {
-    top: 265px;
-    right: 3%;
-    width: 207px;
-  }
-  .landing-art figcaption {
-    bottom: 3px;
-    left: 5%;
   }
   .landing-principles {
     flex-wrap: wrap;
@@ -1132,10 +1123,14 @@
 }
 @media (max-width: 380px) {
   .landing-shell {
-    padding: 0 17px;
+    --shell-gutter: 17px;
   }
   .landing-header .brand {
-    font-size: 24px;
+    font-size: 21px;
+    flex: 0 0 auto;
+  }
+  .landing .landing-header {
+    gap: 6px;
   }
   .landing-header .brand-mark {
     width: 31px;
@@ -1161,16 +1156,6 @@
   .hero-deadline {
     font-size: 10px;
   }
-  .landing-art {
-    height: 405px;
-  }
-  .art-note-value {
-    font-size: 66px;
-  }
-  .art-fragment {
-    top: 250px;
-    width: 190px;
-  }
   .landing h2 {
     font-size: 30px;
   }
@@ -1183,5 +1168,12 @@
   }
   .landing-ready {
     padding: 29px 23px;
+  }
+}
+@media (max-width: 319px) {
+  .landing .landing-header {
+    flex-wrap: wrap;
+    gap: 12px;
+    padding-block: 16px;
   }
 }

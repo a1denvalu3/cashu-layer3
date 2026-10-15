@@ -2,6 +2,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type FormEvent,
   type ReactNode,
 } from "react";
@@ -69,6 +70,8 @@ const initialMint = (() => {
   return "http://127.0.0.1:3338";
 })();
 const format = (n: number) => new Intl.NumberFormat("en-US").format(n);
+const amountStyle = (text: string): CSSProperties =>
+  ({ "--amount-characters": text.length }) as CSSProperties;
 const short = (hash: string) => hash.slice(0, 8) + "…" + hash.slice(-6);
 type Dialog =
   | "fund"
@@ -212,6 +215,7 @@ function ActivityRow({
   showToken: (value: string) => void;
 }) {
   const incoming = row.purpose === "mint" || row.purpose === "receive";
+  const amount = `${incoming ? "+" : "−"}${format(row.amount)}`;
   return (
     <div className="activity-row">
       <span className={`transaction-icon ${incoming ? "incoming" : ""}`}>
@@ -245,8 +249,10 @@ function ActivityRow({
       )}
       <div className="activity-value">
         <strong>
-          {incoming ? "+" : "−"}
-          {format(row.amount)} <span className="small muted">sats</span>
+          <span className="activity-amount" style={amountStyle(amount)}>
+            {amount}
+          </span>
+          <span className="small muted">sats</span>
         </strong>
         <span className="small muted">
           {row.state === "sent" ? "Shared token" : "Completed"}
@@ -497,6 +503,7 @@ export function App() {
         (a.backing!.melt_deadline ?? Infinity) -
         (b.backing!.melt_deadline ?? Infinity),
     )[0]?.backing;
+  const balanceText = view?.verified ? format(usableBalance || 0) : "—";
   void tick;
 
   return (
@@ -605,10 +612,12 @@ export function App() {
                     {canSpend ? "Verified" : "Unverified"}
                   </span>
                 </div>
-                <div className="balance-number" data-testid="balance">
-                  <strong>
-                    {view?.verified ? format(usableBalance || 0) : "—"}
-                  </strong>
+                <div
+                  className="balance-number"
+                  data-testid="balance"
+                  style={amountStyle(balanceText)}
+                >
+                  <strong>{balanceText}</strong>
                   <span>sats</span>
                 </div>
                 <p className="balance-caption">
@@ -795,7 +804,10 @@ export function App() {
                                 : "Unverified"}
                             </span>
                           </div>
-                          <div className="backing-amount">
+                          <div
+                            className="backing-amount"
+                            style={amountStyle(format(g.amount))}
+                          >
                             {format(g.amount)} <span>sats</span>
                           </div>
                           <div className="backing-bottom">
