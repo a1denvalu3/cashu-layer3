@@ -26,7 +26,9 @@ npm ci
 npm run dev
 ```
 
-Open **http://127.0.0.1:5173**. The default mint is
+Open **http://127.0.0.1:5173** for the explainer, then choose **Open wallet**.
+The wallet is also available directly at **http://127.0.0.1:5173/wallet/**.
+The default mint is
 **http://127.0.0.1:3338**. Change it in Settings, or set `VITE_DEFAULT_MINT` before
 starting/building. Node 22.4+ is required. Fonts and scripts are bundled locally.
 
@@ -36,9 +38,10 @@ over HTTPS and use an HTTPS mint; browsers block mixed-content requests.
 
 ## Use
 
-- **Wallet guide:** a dismissible carousel explains expiry, mint custody, private
-  transfers, and settlement. Dismissal is remembered in this browser; choose
-  **How cashu³ works** above the balance to read it again.
+- **Landing page:** explains funding, private transfers, redemption, expiry, and
+  mint trust, with an interactive 1,000-sat example. It opens without connecting
+  to a mint or initializing wallet storage. **Open wallet** takes you to the
+  wallet; **How cashu³ works** in the wallet footer returns to the explainer.
 - **Add sats:** generates and durably saves a backing preimage, requests a HODL
   invoice with its hash, and displays the invoice/QR. Pay from a Lightning wallet.
   Once the payment is held (`ACCEPTED`), the wallet mints denomination proofs.
@@ -110,7 +113,11 @@ npm run test:e2e
 npm run test:e2e:production
 ```
 
-Build produces a static `dist/` with a Content Security Policy. `npm test` runs
+Build produces a static `dist/` with separate `index.html` and `wallet/index.html`
+entries, each with a Content Security Policy. Serve the complete directory from
+the same origin so the landing page and wallet share browser preferences and
+existing IndexedDB funds. The `/wallet/` entry supports direct visits and reloads
+without requiring a server-side SPA fallback. `npm test` runs
 cross-language integration tests against a disposable Python mint, including
 private swaps, combined melts, fee change, deadlines, double-spend reservations,
 lost quote/issuance/swap/melt responses, and authenticated backup encryption.

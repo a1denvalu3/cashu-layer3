@@ -279,132 +279,6 @@ h2 {
 p {
   line-height: 1.65;
 }
-.wallet-guide {
-  margin-bottom: 24px;
-  padding: 25px 28px 20px;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: var(--paper);
-}
-.wallet-guide-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-.wallet-guide-header .eyebrow {
-  color: var(--accent-text);
-}
-.wallet-guide-header h2 {
-  margin: 8px 0 5px;
-  font-size: 25px;
-  line-height: 1.25;
-}
-.wallet-guide-header p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 12px;
-}
-.wallet-guide .wallet-guide-dismiss {
-  width: 40px;
-  height: 40px;
-  flex-shrink: 0;
-  background: var(--surface);
-  border-radius: 50%;
-}
-.wallet-guide-topics {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 22px 0;
-}
-.wallet-guide-topics button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 40px;
-  padding: 9px 13px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 12px;
-}
-.wallet-guide-topics button > span {
-  font-family: "DM Mono", monospace;
-  font-size: 10px;
-}
-.wallet-guide-topics button:hover {
-  background: var(--surface-hover);
-}
-.wallet-guide-topics button.guide-topic-active {
-  background: var(--soft-green);
-  border-color: var(--accent-line);
-  color: var(--ink);
-}
-.wallet-guide-slide {
-  display: flex;
-  align-items: flex-start;
-  gap: 22px;
-  min-height: 145px;
-}
-.wallet-guide-icon {
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  width: 70px;
-  height: 70px;
-  border: 1px solid var(--accent-line);
-  border-radius: 20px;
-  background: var(--soft-green);
-  color: var(--accent-text);
-}
-.wallet-guide-copy {
-  max-width: 760px;
-  min-width: 0;
-}
-.wallet-guide-copy h3 {
-  margin: 0 0 9px;
-  font-size: 21px;
-  font-weight: 500;
-  line-height: 1.3;
-  letter-spacing: -0.4px;
-}
-.wallet-guide-copy p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 13px;
-}
-.wallet-guide-copy .wallet-guide-takeaway {
-  border-left: 3px solid var(--accent-line);
-  margin-top: 14px;
-  padding-left: 12px;
-  color: var(--ink);
-  font-weight: 500;
-}
-.wallet-guide-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border-top: 1px solid var(--line);
-  margin-top: 20px;
-  padding-top: 16px;
-}
-.wallet-guide-footer > span {
-  color: var(--muted);
-}
-.wallet-guide-controls {
-  display: flex;
-  gap: 8px;
-}
-.wallet-guide-reopen {
-  margin: -8px 0 18px;
-}
-.wallet-guide-reopen .text-button {
-  min-height: 40px;
-}
 .balance-card {
   background: var(--balance);
   color: var(--balance-text);
@@ -1321,48 +1195,6 @@ input[type="file"] {
     font-size: 31px;
     letter-spacing: -1px;
   }
-  .wallet-guide {
-    padding: 20px 18px 17px;
-    margin-bottom: 20px;
-  }
-  .wallet-guide-header {
-    gap: 8px;
-  }
-  .wallet-guide-header h2 {
-    font-size: 22px;
-  }
-  .wallet-guide-topics {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 7px;
-    margin: 18px 0;
-  }
-  .wallet-guide-topics button {
-    justify-content: flex-start;
-    min-height: 44px;
-    padding: 9px;
-    font-size: 11px;
-  }
-  .wallet-guide-slide {
-    display: block;
-    min-height: 0;
-  }
-  .wallet-guide-icon {
-    width: 48px;
-    height: 48px;
-    border-radius: 14px;
-    margin-bottom: 15px;
-  }
-  .wallet-guide-icon svg {
-    width: 25px;
-    height: 25px;
-  }
-  .wallet-guide-copy h3 {
-    font-size: 20px;
-  }
-  .wallet-guide-controls .button {
-    min-height: 44px;
-  }
   .balance-card {
     grid-template-columns: 1fr;
   }
@@ -1520,14 +1352,20 @@ input[type="file"] {
   .wallet-actions .button {
     gap: 5px;
   }
-  .wallet-guide-topics button {
-    gap: 5px;
-    padding: 9px 6px;
-  }
   .balance-side {
     flex-wrap: wrap;
   }
   .modal {
     padding: 28px 22px;
   }
+}
+
+.page-loading {
+  padding: 40px;
+  color: var(--muted);
+}
+.app-shell footer .wallet-learn-link {
+  display: inline-flex;
+  min-height: 44px;
+  text-decoration: none;
 }

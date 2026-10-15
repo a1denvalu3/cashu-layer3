@@ -3,7 +3,7 @@ import { psInvoiceDetails } from "@cashu/cashu-ts/layer3";
 import { readFile } from "node:fs/promises";
 
 const mintUrl = "http://127.0.0.1:3339";
-const walletUrl = `http://127.0.0.1:${process.env.WALLET_E2E_PORT || "5173"}`;
+const walletUrl = `http://127.0.0.1:${process.env.WALLET_E2E_PORT || "5173"}/wallet/`;
 test.beforeEach(async ({ page }) => {
   await page.addInitScript((url) => {
     if (!localStorage.getItem("layer3-mint"))
@@ -14,7 +14,7 @@ test.beforeEach(async ({ page }) => {
 test("keeps balances and backings visible when the saved mint URL has a trailing slash", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/wallet/");
   await expect(page.getByText("Mint connected", { exact: true })).toBeVisible();
   await fund(page, 100);
   await page.evaluate(
@@ -38,7 +38,7 @@ test("continues polling newer deposits when an older quote is unavailable", asyn
     quotes.push((await response.json()).quote);
     await route.fulfill({ response });
   });
-  await page.goto("/");
+  await page.goto("/wallet/");
   await expect(page.getByText("Mint connected", { exact: true })).toBeVisible();
   for (const value of [10, 100]) {
     await page.getByRole("button", { name: "Add sats", exact: true }).click();
@@ -73,7 +73,7 @@ test("continues polling newer deposits when an older quote is unavailable", asyn
 test("opens with a malformed saved preference and preserves funds when reconnecting", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/wallet/");
   await expect(page.getByText("Mint connected", { exact: true })).toBeVisible();
   await fund(page, 100);
   await page.route("http://127.0.0.1:3338/**", (route) =>
@@ -115,7 +115,7 @@ async function fund(page: Page, value: number) {
 test("completes a pending payment without a manual retry or a second payment", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/wallet/");
   await expect(page.getByText("Mint connected", { exact: true })).toBeVisible();
   await fund(page, 100);
   const requests: string[] = [];
@@ -161,7 +161,7 @@ test("completes a pending payment without a manual retry or a second payment", a
 test("shows a slow payment as pending while preserving its request", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/wallet/");
   await expect(page.getByText("Mint connected", { exact: true })).toBeVisible();
   await fund(page, 100);
   await page.route(mintUrl + "/v1/melt/bolt11", (route) =>
@@ -204,7 +204,7 @@ test("shows a slow payment as pending while preserving its request", async ({
 test("mints after closing the invoice and recovers falsely expired proofs on reload", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/wallet/");
   await expect(page.getByText("Mint connected", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Add sats", exact: true }).click();
   await page.getByLabel("Amount in sats").fill("100");
@@ -271,10 +271,10 @@ test("shows the mint's two-week policy as a read-only setting", async ({
       },
     });
   });
-  await page.goto("/");
-  await expect(page).toHaveTitle("cashu3 — Cash with a deadline");
+  await page.goto("/wallet/");
+  await expect(page).toHaveTitle("cashu3 wallet — Cash with a deadline");
   await expect(
-    page.getByRole("link", { name: "cashu3 (cashu cubed) wallet home" }),
+    page.getByRole("link", { name: "cashu3 (cashu cubed) home" }),
   ).toBeVisible();
   await expect(page.getByText("Mint connected", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
@@ -299,7 +299,7 @@ test("shows Spark's minimum CLTV separately from token lifetime", async ({
       },
     });
   });
-  await page.goto("/");
+  await page.goto("/wallet/");
   await expect(page.getByText("Mint connected", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(
@@ -314,7 +314,7 @@ test("fund, reload, send, receive in a second wallet, melt and expire residual c
 }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto("/");
+  await page.goto("/wallet/");
   await expect(page.getByText("Mint connected", { exact: true })).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Cash, with a deadline." }),
@@ -384,7 +384,7 @@ test("fund, reload, send, receive in a second wallet, melt and expire residual c
 test("retries the saved send after a lost response and browser reload", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/wallet/");
   await expect(page.getByText("Mint connected", { exact: true })).toBeVisible();
   await fund(page, 100);
   let dropped = false;
@@ -417,7 +417,7 @@ test("mobile navigation, invalid tokens, and offline balance visibility", async 
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/");
+  await page.goto("/wallet/");
   await expect(page.getByText("Mint connected", { exact: true })).toBeVisible();
   await page.screenshot({
     path: "test-results/wallet-mobile.png",
@@ -447,7 +447,7 @@ test("exports a real encrypted wallet backup and restores it in an empty browser
   page,
   browser,
 }) => {
-  await page.goto("/");
+  await page.goto("/wallet/");
   await expect(page.getByText("Mint connected", { exact: true })).toBeVisible();
   await fund(page, 64);
   await page.getByRole("button", { name: "Send", exact: true }).click();
