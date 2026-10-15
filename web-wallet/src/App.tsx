@@ -1266,7 +1266,38 @@ export function App() {
               onSubmit={(e) => {
                 e.preventDefault();
                 run(async () => {
-                  const value = await manager!.receive(tokenText);
+                  const encoded = tokenText;
+                  const token = manager!.wallet.verifyToken(
+                    decodePSToken(encoded),
+                  );
+                  const snapshot = await manager!.wallet.pendingHTLCs();
+                  const now = Math.max(
+                    Math.floor(Date.now() / 1000),
+                    snapshot.checked_at,
+                  );
+                  const backings = token.proofs.map((proof) =>
+                    checkPSBacking(proof, snapshot, now),
+                  );
+                  const nearDeadline = backings.some((backing) => {
+                    const minutesRemaining =
+                      snapshot.block_height !== null
+                        ? (backing.melt_deadline_height! -
+                            snapshot.block_height) *
+                          10
+                        : (backing.melt_deadline! - now) / 60;
+                    return minutesRemaining < 20;
+                  });
+                  if (
+                    nearDeadline &&
+                    !window.confirm(
+                      "Are you sure you want to receive this ecash that will expire in less than 20 minutes?" +
+                        (snapshot.block_height !== null
+                          ? "\n\nThis estimate assumes 10 minutes per block; actual block times vary."
+                          : ""),
+                    )
+                  )
+                    return;
+                  const value = await manager!.receive(encoded);
                   close();
                   setNotice(`Received ${format(value)} sats.`);
                   setDialog(null);
@@ -1282,6 +1313,7 @@ export function App() {
                 rows={6}
                 placeholder="Paste token…"
                 required
+                disabled={busy}
                 value={tokenText}
                 onChange={(e) => setTokenText(e.target.value)}
               />
