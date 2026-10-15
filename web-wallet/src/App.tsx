@@ -45,7 +45,6 @@ import {
   type PSMeltQuote,
 } from "@cashu/cashu-ts/layer3";
 import { decryptBackup, encryptBackup } from "./backup";
-import { WalletGuide } from "./WalletGuide";
 import { useTheme } from "./theme";
 
 const repo = new Layer3IndexedDbRepository();
@@ -500,11 +499,7 @@ export function App() {
   return (
     <div className="app-shell">
       <header className="header">
-        <a
-          className="brand"
-          href="/"
-          aria-label="cashu3 (cashu cubed) wallet home"
-        >
+        <a className="brand" href="/" aria-label="cashu3 (cashu cubed) home">
           <span className="brand-mark">
             <Box size={25} strokeWidth={1.6} />
           </span>
@@ -591,7 +586,6 @@ export function App() {
                 Your sats stay backed by a live HTLC.
               </p>
             </div>
-            <WalletGuide />
             <section className="balance-card" aria-label="Wallet balance">
               <div className="balance-main">
                 <div className="balance-label">
@@ -1058,12 +1052,12 @@ export function App() {
           <span className="status-dot" /> YOUR KEYS LIVE HERE
         </span>
         <span>cashu3 · Experimental HTLC ecash</span>
-        <button
-          className="text-button small"
-          onClick={() => setTab("settings")}
+        <a
+          className="text-button small wallet-learn-link"
+          href="/#how-it-works"
         >
-          Wallet settings <ArrowUpRight size={13} />
-        </button>
+          How cashu³ works <ArrowUpRight size={13} />
+        </a>
       </footer>
       {dialog && (
         <Modal

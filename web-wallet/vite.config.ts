@@ -1,5 +1,6 @@
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
+import { fileURLToPath } from "node:url";
 
 export default defineConfig(({ command }) => ({
   plugins: [
@@ -23,5 +24,13 @@ export default defineConfig(({ command }) => ({
     },
   ],
   server: { port: 5173, strictPort: true },
+  build: {
+    rollupOptions: {
+      input: {
+        landing: fileURLToPath(new URL("./index.html", import.meta.url)),
+        wallet: fileURLToPath(new URL("./wallet/index.html", import.meta.url)),
+      },
+    },
+  },
   test: { include: ["tests/**/*.test.ts"], testTimeout: 30000 },
 }));
