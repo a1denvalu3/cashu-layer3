@@ -39,7 +39,7 @@ def test_wallet_can_read_mint_json_and_validation_errors(service):
     info = service.client.http.get("/v1/info", headers=headers)
     assert info.status_code == 200
     assert info.headers["access-control-allow-origin"] == "*"
-    assert info.json()["name"] == "cashu3"
+    assert info.json()["name"] == "tmp.cash"
     invalid = service.client.http.post(
         "/v1/mint/quote/bolt11", json={}, headers=headers
     )

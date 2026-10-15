@@ -18,7 +18,7 @@ from coincurve import PrivateKey
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from cashu.sparkl2 import SPARK_MAINNET_MIN_FINAL_CLTV_EXPIRY_DELTA  # noqa: E402
+from tmp_cash.sparkl2 import SPARK_MAINNET_MIN_FINAL_CLTV_EXPIRY_DELTA  # noqa: E402
 
 
 def base64url(value: bytes) -> str:
@@ -72,7 +72,7 @@ def verify_policy() -> None:
                         "amount_sats": 1000,
                         "payment_hash": payment_hash,
                         "expiry_secs": expiry,
-                        "memo": "cashu3 unpaid CLTV verification",
+                        "memo": "tmp.cash unpaid CLTV verification",
                         "include_spark_address": False,
                     }
                 },

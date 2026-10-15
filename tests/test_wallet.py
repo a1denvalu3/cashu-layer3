@@ -5,9 +5,9 @@ import time
 
 import pytest
 
-from cashu.models import preimage_hash
-from cashu.token import decode_token
-from cashu.wallet import Wallet
+from tmp_cash.models import preimage_hash
+from tmp_cash.token import decode_token
+from tmp_cash.wallet import Wallet
 
 
 def mint_to_wallet(service, wallet, amount=16, preimage=None):
@@ -164,7 +164,7 @@ def test_abandon_preserves_sent_input_state(service):
 def test_abandon_cannot_delete_recovery_during_concurrent_submission(
     service, monkeypatch
 ):
-    from cashu.client import ClientError
+    from tmp_cash.client import ClientError
 
     wallet = Wallet(service.path / "wallet.sqlite3")
     token = mint_to_wallet(service, wallet)
@@ -196,7 +196,7 @@ def test_abandon_cannot_delete_recovery_during_concurrent_submission(
 def test_interrupted_split_send_retry_preserves_exact_outgoing_amount(
     service, monkeypatch
 ):
-    from cashu.client import ClientError
+    from tmp_cash.client import ClientError
 
     wallet = Wallet(service.path / "wallet.sqlite3")
     mint_to_wallet(service, wallet, 100)
@@ -218,7 +218,7 @@ def test_interrupted_split_send_retry_preserves_exact_outgoing_amount(
 
 
 def test_confirmed_failed_melt_releases_wallet_inputs(service):
-    from cashu.client import ClientError
+    from tmp_cash.client import ClientError
 
     wallet = Wallet(service.path / "wallet.sqlite3")
     token = mint_to_wallet(service, wallet)
@@ -235,7 +235,7 @@ def test_confirmed_failed_melt_releases_wallet_inputs(service):
 def test_unknown_submission_cannot_be_abandoned_when_inputs_appear_unspent(
     service, monkeypatch
 ):
-    from cashu.client import ClientError
+    from tmp_cash.client import ClientError
 
     wallet = Wallet(service.path / "wallet.sqlite3")
     token = mint_to_wallet(service, wallet)
@@ -293,7 +293,7 @@ def test_wallet_migration_keeps_old_submitted_recovery_material(service):
 
 
 def test_legacy_melt_failure_restores_live_inputs(service):
-    from cashu.client import ClientError
+    from tmp_cash.client import ClientError
 
     token, _ = service.fund(16)
     service.backend.fee_msat = 1000
@@ -309,7 +309,7 @@ def test_legacy_melt_failure_restores_live_inputs(service):
 def test_expired_melt_quote_releases_only_confirmed_unspent_inputs(
     service, monkeypatch
 ):
-    from cashu.client import ClientError
+    from tmp_cash.client import ClientError
 
     wallet = Wallet(service.path / "wallet.sqlite3")
     token = mint_to_wallet(service, wallet)
@@ -331,8 +331,8 @@ def test_expired_melt_quote_releases_only_confirmed_unspent_inputs(
 
 
 def test_rejected_combined_melt_does_not_lock_its_remaining_live_backing(service):
-    from cashu.client import ClientError
-    from cashu.models import Token
+    from tmp_cash.client import ClientError
+    from tmp_cash.models import Token
 
     wallet = Wallet(service.path / "wallet.sqlite3")
     live = mint_to_wallet(service, wallet, 64)
@@ -357,8 +357,8 @@ def test_ambiguous_backing_status_preserves_melt_journal_for_exact_retry(
 ):
     from dataclasses import replace
 
-    from cashu.client import ClientError
-    from cashu.models import InvoiceState
+    from tmp_cash.client import ClientError
+    from tmp_cash.models import InvoiceState
 
     wallet = Wallet(service.path / "wallet.sqlite3")
     token = mint_to_wallet(service, wallet)
@@ -388,7 +388,7 @@ def test_ambiguous_backing_status_preserves_melt_journal_for_exact_retry(
 def test_legacy_ambiguous_rejection_does_not_release_melt_recovery(
     service, monkeypatch
 ):
-    from cashu.client import ClientError
+    from tmp_cash.client import ClientError
 
     wallet = Wallet(service.path / "wallet.sqlite3")
     token = mint_to_wallet(service, wallet)
@@ -410,7 +410,7 @@ def test_legacy_ambiguous_rejection_does_not_release_melt_recovery(
 def test_competing_payout_reservation_rejection_keeps_recovery_for_retry(
     service, monkeypatch
 ):
-    from cashu.client import ClientError
+    from tmp_cash.client import ClientError
 
     wallet = Wallet(service.path / "wallet.sqlite3")
     token = mint_to_wallet(service, wallet)
@@ -434,7 +434,7 @@ def test_competing_payout_reservation_rejection_keeps_recovery_for_retry(
 
 
 def test_already_paid_invoice_releases_fresh_inputs_without_a_second_payout(service):
-    from cashu.client import ClientError
+    from tmp_cash.client import ClientError
 
     wallet = Wallet(service.path / "wallet.sqlite3")
     first = mint_to_wallet(service, wallet, 16)

@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import {
   ArrowDown,
   ArrowUpRight,
-  Box,
   Clock3,
   Code2,
   Fingerprint,
@@ -18,6 +17,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useTheme } from "./theme";
+import { TmpCashMark } from "./TmpCashMark";
 import "./landing.css";
 
 function WalletLink() {
@@ -48,9 +48,9 @@ function CashIllustration() {
       <div className="art-note">
         <div className="art-note-top">
           <span>
-            cashu<sup>³</sup>
+            tmp<span>.cash</span>
           </span>
-          <Box size={25} strokeWidth={1.3} aria-hidden="true" />
+          <TmpCashMark size={25} strokeWidth={1.3} aria-hidden="true" />
         </div>
         <div className="art-note-value">
           750<span>sats</span>
@@ -60,7 +60,7 @@ function CashIllustration() {
           <Layers3 size={18} aria-hidden="true" />
         </div>
         <div className="art-note-seal" aria-hidden="true">
-          <Box size={67} strokeWidth={0.7} />
+          <TmpCashMark size={67} strokeWidth={0.7} />
         </div>
       </div>
       <div className="art-fragment">
@@ -220,7 +220,7 @@ function TransferDiagram() {
           </svg>
           <div className="diagram-node diagram-mint">
             <span className="diagram-avatar">
-              <Box size={22} strokeWidth={1.5} aria-hidden="true" />
+              <TmpCashMark size={22} strokeWidth={1.5} aria-hidden="true" />
             </span>
             <strong>Mint</strong>
           </div>
@@ -370,7 +370,7 @@ const questions = [
   },
   {
     title: "What do I need to use it?",
-    text: "Connect to a cashu3 mint you trust to issue ecash and honor redemptions. Your wallet lives in this browser, so keep an encrypted backup before clearing browser data. This is experimental software, and its tokens are incompatible with standard Cashu wallets.",
+    text: "Connect to a tmp.cash mint you trust to issue ecash and honor redemptions. Your wallet lives in this browser, so keep an encrypted backup before clearing browser data. This is experimental software, and its tokens are incompatible with standard Cashu wallets.",
   },
 ];
 
@@ -383,11 +383,11 @@ export function LandingPage() {
       </a>
       <div className="landing-shell">
         <header className="header landing-header">
-          <a className="brand" href="/" aria-label="cashu3 (cashu cubed) home">
+          <a className="brand" href="/" aria-label="tmp.cash home">
             <span className="brand-mark">
-              <Box size={25} strokeWidth={1.6} aria-hidden="true" />
+              <TmpCashMark size={25} strokeWidth={1.6} aria-hidden="true" />
             </span>
-            cashu<span>³</span>
+            tmp<span>.cash</span>
           </a>
           <nav aria-label="Main navigation">
             <a href="#how-it-works">How it works</a>
@@ -416,7 +416,7 @@ export function LandingPage() {
           <section className="landing-hero" aria-labelledby="hero-title">
             <div className="hero-copy">
               <span className="eyebrow hero-eyebrow">
-                <span /> CASHU³ / EXPLAINED
+                <span /> tmp.cash / EXPLAINED
               </span>
               <h1 id="hero-title">
                 Ecash from a
@@ -521,8 +521,8 @@ export function LandingPage() {
               <p>Connect to a compatible mint to get started.</p>
             </div>
             <WalletLink />
-            <Box
-              className="ready-cube"
+            <TmpCashMark
+              className="ready-hourglass"
               size={230}
               strokeWidth={0.45}
               aria-hidden="true"
@@ -531,7 +531,7 @@ export function LandingPage() {
         </main>
         <footer className="landing-footer">
           <span>
-            <span className="status-dot" /> cashu³ · EXPERIMENTAL ECASH
+            <span className="status-dot" /> tmp.cash · EXPERIMENTAL ECASH
           </span>
           <span>Frozen Lightning deposits. Private ecash transfers.</span>
           <a

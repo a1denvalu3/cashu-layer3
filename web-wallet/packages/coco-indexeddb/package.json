@@ -6,11 +6,11 @@
   "license": "MIT",
   "exports": {
     ".": "./index.ts",
-    "./layer3": "./src/layer3/index.ts"
+    "./tmp-cash": "./src/tmp-cash/index.ts"
   },
   "dependencies": {
     "coco-cashu-core": "file:../coco",
     "dexie": "4.0.11"
   },
-  "layer3Fork": true
+  "tmpCashFork": true
 }

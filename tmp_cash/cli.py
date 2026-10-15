@@ -22,7 +22,7 @@ def wait_and_mint(
     """Keep the exact issuance request across interrupted waits and responses."""
     resume = shlex.join(
         [
-            "cashu",
+            "tmp.cash",
             "--mint",
             client.mint_url,
             "--wallet",
@@ -91,7 +91,8 @@ def wait_and_mint(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="cashu3 wallet for denominated, expiring Lightning HTLC tokens"
+        prog="tmp.cash",
+        description="tmp.cash wallet for denominated, expiring Lightning HTLC tokens",
     )
     parser.add_argument("--mint", help="mint URL (default: http://127.0.0.1:3338)")
     parser.add_argument("--wallet", type=Path, default=Path("data/wallet-v3.sqlite3"))

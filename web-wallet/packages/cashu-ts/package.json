@@ -6,7 +6,7 @@
   "license": "MIT",
   "exports": {
     ".": "./src/index.ts",
-    "./layer3": "./src/layer3/index.ts"
+    "./tmp-cash": "./src/tmp-cash/index.ts"
   },
   "dependencies": {
     "@noble/curves": "2.0.1",
@@ -16,5 +16,5 @@
     "zod": "3.25.76",
     "light-bolt11-decoder": "3.2.0"
   },
-  "layer3Fork": true
+  "tmpCashFork": true
 }

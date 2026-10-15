@@ -862,7 +862,7 @@
 .landing .landing-ready .landing-open:hover {
   background: #e2f48f;
 }
-.ready-cube {
+.ready-hourglass {
   position: absolute;
   z-index: -1;
   right: 140px;
@@ -1113,7 +1113,7 @@
   .landing-ready .landing-open {
     margin-top: 27px;
   }
-  .ready-cube {
+  .ready-hourglass {
     right: -60px;
     bottom: -20px;
   }

@@ -9,15 +9,15 @@ import pytest
 from bolt11 import TagChar, decode, encode
 from fastapi.testclient import TestClient
 
-from cashu.api import create_app
-from cashu.client import Client, ClientError
-from cashu.db import BackendError
-from cashu.lightning import FakeBackend, PaymentState
-from cashu.mint import Mint
-from cashu.models import InvoiceState
+from tmp_cash.api import create_app
+from tmp_cash.client import Client, ClientError
+from tmp_cash.db import BackendError
+from tmp_cash.lightning import FakeBackend, PaymentState
+from tmp_cash.mint import Mint
+from tmp_cash.models import InvoiceState
 
 breez = pytest.importorskip("breez_sdk_spark")
-from cashu.sparkl2 import (  # noqa: E402 - optional test dependency
+from tmp_cash.sparkl2 import (  # noqa: E402 - optional test dependency
     SPARK_MAINNET_MIN_FINAL_CLTV_EXPIRY_DELTA,
     SparkBackend,
     SparkConnection,
@@ -305,7 +305,7 @@ def test_operator_funding_uses_an_ordinary_invoice_without_creating_ecash(
         assert decoded.min_final_cltv_expiry == 18  # Ordinary SSP policy, not HODL.
         assert sdk.receives[0].payment_hash is None
         assert sdk.receives[0].amount_sats == 10000
-        assert sdk.receives[0].description == "cashu3 operator liquidity"
+        assert sdk.receives[0].description == "tmp.cash operator liquidity"
         assert not sdk.claims and not sdk.sends
         assert http.get("/v1/htlcs/pending").json()["htlcs"] == []
     for db, table in ((backend.db, "invoices"), (mint.db, "quotes")):
@@ -405,7 +405,7 @@ def test_mainnet_cltv_policy_is_published_without_inventing_token_lifetime(
     mint = Mint(tmp_path / "mint.sqlite3", os.urandom(32), backend)
     with TestClient(create_app(mint, recovery=False)) as http:
         info = http.get("/v1/info").json()
-    assert info["name"] == "cashu3"
+    assert info["name"] == "tmp.cash"
     assert info["funding_htlc_cltv_delta"] == 60
     assert info["default_token_lifetime_blocks"] is None
 

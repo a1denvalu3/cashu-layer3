@@ -9,11 +9,11 @@ from bolt11 import decode, encode
 from conftest import PREIMAGE
 from fastapi.testclient import TestClient
 
-from cashu.api import create_app
-from cashu.db import BackendError
-from cashu.lightning import FakeBackend, LndRestBackend, PaymentState
-from cashu.mint import Mint
-from cashu.models import InvoiceState
+from tmp_cash.api import create_app
+from tmp_cash.db import BackendError
+from tmp_cash.lightning import FakeBackend, LndRestBackend, PaymentState
+from tmp_cash.mint import Mint
+from tmp_cash.models import InvoiceState
 
 
 def test_lnd_operator_funding_uses_standard_invoices_not_holds(tmp_path):
@@ -28,7 +28,7 @@ def test_lnd_operator_funding_uses_standard_invoices_not_holds(tmp_path):
         assert json.loads(request.content) == {
             "value": "10000",
             "expiry": "600",
-            "memo": "cashu3 operator liquidity",
+            "memo": "tmp.cash operator liquidity",
         }
         return httpx.Response(
             200,

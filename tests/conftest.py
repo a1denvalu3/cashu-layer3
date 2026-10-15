@@ -6,11 +6,11 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from cashu.api import create_app
-from cashu.client import Client
-from cashu.lightning import FakeBackend
-from cashu.mint import Mint
-from cashu.models import Token
+from tmp_cash.api import create_app
+from tmp_cash.client import Client
+from tmp_cash.lightning import FakeBackend
+from tmp_cash.mint import Mint
+from tmp_cash.models import Token
 
 SEED = b"layer3 test mint seed............"
 PREIMAGE = hashlib.sha256(b"receiver's test preimage").digest()

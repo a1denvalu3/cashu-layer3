@@ -3,8 +3,8 @@ import json
 
 import pytest
 
-from cashu.models import Token
-from cashu.token import MAX_TOKEN_LENGTH, decode_token, encode_token
+from tmp_cash.models import Token
+from tmp_cash.token import MAX_TOKEN_LENGTH, decode_token, encode_token
 
 
 def test_token_bundle_roundtrips_all_denominations_and_backing_secrets(service):

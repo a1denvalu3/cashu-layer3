@@ -28,7 +28,7 @@ if (window.location.pathname === "/wallet") {
       <Suspense
         fallback={
           <p className="page-loading" role="status">
-            Opening cashu³…
+            Opening tmp.cash…
           </p>
         }
       >

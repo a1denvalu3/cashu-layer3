@@ -5,8 +5,8 @@ import httpx
 import pytest
 from conftest import PREIMAGE
 
-from cashu.db import BackendError
-from cashu.lightning import FakeBackend, LndRestBackend, PaymentState
+from tmp_cash.db import BackendError
+from tmp_cash.lightning import FakeBackend, LndRestBackend, PaymentState
 
 
 @pytest.mark.asyncio

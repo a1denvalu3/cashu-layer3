@@ -5,48 +5,89 @@ import pytest
 from conftest import SEED
 from fastapi.testclient import TestClient
 
-from cashu.api import create_app
-from cashu.mint import Mint
-from cashu.server import create_backend, parse_args
+from tmp_cash.api import create_app
+from tmp_cash.mint import Mint
+from tmp_cash.server import create_backend, parse_args
 
 
 @pytest.fixture(autouse=True)
 def isolated_configuration(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     for name in (
-        "CASHU_MINT_BACKEND",
-        "CASHU_MINT_DATA",
-        "CASHU_MINT_HOST",
-        "CASHU_MINT_PORT",
-        "CASHU_ADMIN_TOKEN",
-        "CASHU_LND_ENDPOINT",
-        "CASHU_LND_CERT",
-        "CASHU_LND_MACAROON",
-        "CASHU_FEE_LIMIT_SAT",
-        "CASHU_LND_HOLD_EXPIRY_DELTA",
-        "CASHU_LND_TOKEN_LIFETIME_BLOCKS",
-        "CASHU_SETTLE_MARGIN_BLOCKS",
-        "CASHU_SETTLE_MARGIN_SECONDS",
-        "CASHU_SPARK_MNEMONIC",
-        "CASHU_SPARK_MNEMONIC_FILE",
-        "CASHU_SPARK_API_KEY",
-        "CASHU_SPARK_NETWORK",
-        "CASHU_SPARK_CONFIG_FILE",
+        "TMP_CASH_MINT_BACKEND",
+        "TMP_CASH_MINT_DATA",
+        "TMP_CASH_MINT_HOST",
+        "TMP_CASH_MINT_PORT",
+        "TMP_CASH_ADMIN_TOKEN",
+        "TMP_CASH_LND_ENDPOINT",
+        "TMP_CASH_LND_CERT",
+        "TMP_CASH_LND_MACAROON",
+        "TMP_CASH_FEE_LIMIT_SAT",
+        "TMP_CASH_LND_HOLD_EXPIRY_DELTA",
+        "TMP_CASH_LND_TOKEN_LIFETIME_BLOCKS",
+        "TMP_CASH_SETTLE_MARGIN_BLOCKS",
+        "TMP_CASH_SETTLE_MARGIN_SECONDS",
+        "TMP_CASH_SPARK_MNEMONIC",
+        "TMP_CASH_SPARK_MNEMONIC_FILE",
+        "TMP_CASH_SPARK_API_KEY",
+        "TMP_CASH_SPARK_NETWORK",
+        "TMP_CASH_SPARK_CONFIG_FILE",
     ):
         monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(name.replace("TMP_CASH_", "CASHU_", 1), raising=False)
+
+
+@pytest.mark.parametrize(
+    "dotenv,environment,expected_port",
+    [
+        ("CASHU_MINT_PORT=4338\n", {}, 4338),
+        ("CASHU_MINT_PORT=4338\nTMP_CASH_MINT_PORT=5338\n", {}, 5338),
+        ("TMP_CASH_MINT_PORT=4338\nCASHU_MINT_PORT=5338\n", {}, 4338),
+        ("TMP_CASH_MINT_PORT=4338\n", {"CASHU_MINT_PORT": "5338"}, 5338),
+        (
+            "CASHU_MINT_PORT=4338\n",
+            {"TMP_CASH_MINT_PORT": "5338", "CASHU_MINT_PORT": "6338"},
+            5338,
+        ),
+    ],
+)
+def test_legacy_configuration_preserves_source_precedence(
+    tmp_path, monkeypatch, dotenv, environment, expected_port
+):
+    (tmp_path / ".env").write_text(dotenv)
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+    assert parse_args([]).port == expected_port
+    assert parse_args(["--port", "7338"]).port == 7338
+
+
+def test_legacy_configuration_keeps_the_backend_data_and_operator_secret(tmp_path):
+    (tmp_path / ".env").write_text(
+        "CASHU_MINT_BACKEND=lnd\n"
+        "CASHU_MINT_DATA=data/existing-mint\n"
+        "CASHU_LND_ENDPOINT=https://localhost:8081\n"
+        "CASHU_LND_MACAROON=admin.macaroon\n"
+        "CASHU_ADMIN_TOKEN=existing-secret\n"
+    )
+    args = parse_args([])
+    assert args.backend == "lnd"
+    assert args.data == Path("data/existing-mint")
+    assert args.lnd_endpoint == "https://localhost:8081"
+    assert args.lnd_macaroon == Path("admin.macaroon")
+    assert args.admin_token == "existing-secret"
 
 
 def test_dotenv_selects_lnd_and_its_credentials(tmp_path):
     (tmp_path / ".env").write_text(
-        "CASHU_MINT_BACKEND=lnd\n"
-        "CASHU_MINT_DATA=data/lnd-mint\n"
-        "CASHU_LND_ENDPOINT=https://localhost:8081\n"
-        'CASHU_LND_MACAROON="data/lnd mint/admin.macaroon"\n'
-        "CASHU_LND_CERT=data/lnd-mint/tls.cert\n"
-        "CASHU_MINT_PORT=4338\n"
-        "CASHU_FEE_LIMIT_SAT=20\n"
-        "CASHU_LND_HOLD_EXPIRY_DELTA=30\n"
-        "CASHU_LND_TOKEN_LIFETIME_BLOCKS=1000\n"
+        "TMP_CASH_MINT_BACKEND=lnd\n"
+        "TMP_CASH_MINT_DATA=data/lnd-mint\n"
+        "TMP_CASH_LND_ENDPOINT=https://localhost:8081\n"
+        'TMP_CASH_LND_MACAROON="data/lnd mint/admin.macaroon"\n'
+        "TMP_CASH_LND_CERT=data/lnd-mint/tls.cert\n"
+        "TMP_CASH_MINT_PORT=4338\n"
+        "TMP_CASH_FEE_LIMIT_SAT=20\n"
+        "TMP_CASH_LND_HOLD_EXPIRY_DELTA=30\n"
+        "TMP_CASH_LND_TOKEN_LIFETIME_BLOCKS=1000\n"
     )
     args = parse_args([])
     assert args.backend == "lnd"
@@ -61,11 +102,13 @@ def test_dotenv_selects_lnd_and_its_credentials(tmp_path):
 
 
 def test_cli_overrides_environment_which_overrides_dotenv(tmp_path, monkeypatch):
-    (tmp_path / ".env").write_text("CASHU_MINT_BACKEND=fake\nCASHU_MINT_PORT=4338\n")
-    monkeypatch.setenv("CASHU_MINT_BACKEND", "lnd")
-    monkeypatch.setenv("CASHU_MINT_PORT", "5338")
-    monkeypatch.setenv("CASHU_LND_ENDPOINT", "https://localhost:8081")
-    monkeypatch.setenv("CASHU_LND_MACAROON", "admin.macaroon")
+    (tmp_path / ".env").write_text(
+        "TMP_CASH_MINT_BACKEND=fake\nTMP_CASH_MINT_PORT=4338\n"
+    )
+    monkeypatch.setenv("TMP_CASH_MINT_BACKEND", "lnd")
+    monkeypatch.setenv("TMP_CASH_MINT_PORT", "5338")
+    monkeypatch.setenv("TMP_CASH_LND_ENDPOINT", "https://localhost:8081")
+    monkeypatch.setenv("TMP_CASH_LND_MACAROON", "admin.macaroon")
     assert parse_args([]).backend == "lnd"
     assert parse_args([]).port == 5338
     args = parse_args(["--backend", "fake", "--port", "6338"])
@@ -77,16 +120,16 @@ def test_operator_secret_is_optional_and_environment_overrides_dotenv(
     tmp_path, monkeypatch
 ):
     assert parse_args([]).admin_token is None
-    (tmp_path / ".env").write_text("CASHU_ADMIN_TOKEN=file-secret\n")
+    (tmp_path / ".env").write_text("TMP_CASH_ADMIN_TOKEN=file-secret\n")
     assert parse_args([]).admin_token == "file-secret"
-    monkeypatch.setenv("CASHU_ADMIN_TOKEN", "environment-secret")
+    monkeypatch.setenv("TMP_CASH_ADMIN_TOKEN", "environment-secret")
     assert parse_args([]).admin_token == "environment-secret"
 
 
 def test_mint_command_passes_operator_secret_to_the_api(tmp_path, monkeypatch):
-    from cashu.server import main
+    from tmp_cash.server import main
 
-    monkeypatch.setenv("CASHU_ADMIN_TOKEN", "operator-test-secret")
+    monkeypatch.setenv("TMP_CASH_ADMIN_TOKEN", "operator-test-secret")
     monkeypatch.setattr("sys.argv", ["mint", "--data", str(tmp_path / "mint")])
 
     def run(app, **kwargs):
@@ -100,7 +143,7 @@ def test_mint_command_passes_operator_secret_to_the_api(tmp_path, monkeypatch):
             assert response.status_code == 200
             assert response.json()["amount"] == 1000
 
-    monkeypatch.setattr("cashu.server.uvicorn.run", run)
+    monkeypatch.setattr("tmp_cash.server.uvicorn.run", run)
     main()
 
 
@@ -158,20 +201,20 @@ def test_time_based_backend_does_not_advertise_a_block_lifetime(tmp_path):
 @pytest.mark.parametrize(
     "configuration",
     [
-        "CASHU_MINT_BACKEND=unsupported\n",
-        "CASHU_MINT_BACKEND=lnd\n",
-        "CASHU_MINT_PORT=invalid\n",
-        "CASHU_FEE_LIMIT_SAT=-1\n",
-        "CASHU_LND_HOLD_EXPIRY_DELTA=-1\n",
-        "CASHU_LND_TOKEN_LIFETIME_BLOCKS=0\n",
-        "CASHU_LND_TOKEN_LIFETIME_BLOCKS=-1\n",
-        "CASHU_LND_TOKEN_LIFETIME_BLOCKS=65535\n",
-        "CASHU_SETTLE_MARGIN_BLOCKS=0\n",
-        "CASHU_SETTLE_MARGIN_SECONDS=-1\n",
-        "CASHU_MINT_BACKEND=spark\n",
-        "CASHU_MINT_BACKEND=spark\nCASHU_SPARK_MNEMONIC=test\nCASHU_SPARK_NETWORK=signet\n",
-        "CASHU_MINT_BACKEND=spark\nCASHU_SPARK_MNEMONIC=test\nCASHU_SPARK_NETWORK=regtest\n",
-        "CASHU_MINT_BACKEND=spark\nCASHU_SPARK_MNEMONIC=test\nCASHU_SPARK_CONFIG_FILE=local.json\n",
+        "TMP_CASH_MINT_BACKEND=unsupported\n",
+        "TMP_CASH_MINT_BACKEND=lnd\n",
+        "TMP_CASH_MINT_PORT=invalid\n",
+        "TMP_CASH_FEE_LIMIT_SAT=-1\n",
+        "TMP_CASH_LND_HOLD_EXPIRY_DELTA=-1\n",
+        "TMP_CASH_LND_TOKEN_LIFETIME_BLOCKS=0\n",
+        "TMP_CASH_LND_TOKEN_LIFETIME_BLOCKS=-1\n",
+        "TMP_CASH_LND_TOKEN_LIFETIME_BLOCKS=65535\n",
+        "TMP_CASH_SETTLE_MARGIN_BLOCKS=0\n",
+        "TMP_CASH_SETTLE_MARGIN_SECONDS=-1\n",
+        "TMP_CASH_MINT_BACKEND=spark\n",
+        "TMP_CASH_MINT_BACKEND=spark\nTMP_CASH_SPARK_MNEMONIC=test\nTMP_CASH_SPARK_NETWORK=signet\n",
+        "TMP_CASH_MINT_BACKEND=spark\nTMP_CASH_SPARK_MNEMONIC=test\nTMP_CASH_SPARK_NETWORK=regtest\n",
+        "TMP_CASH_MINT_BACKEND=spark\nTMP_CASH_SPARK_MNEMONIC=test\nTMP_CASH_SPARK_CONFIG_FILE=local.json\n",
     ],
 )
 def test_invalid_configuration_fails_instead_of_using_fake(tmp_path, configuration):
@@ -183,16 +226,16 @@ def test_invalid_configuration_fails_instead_of_using_fake(tmp_path, configurati
 
 def test_spark_configuration_uses_file_and_environment(tmp_path, monkeypatch):
     (tmp_path / ".env").write_text(
-        "CASHU_MINT_BACKEND=spark\n"
-        "CASHU_SPARK_MNEMONIC_FILE=wallet.mnemonic\n"
-        "CASHU_SPARK_API_KEY=test-key\n"
-        "CASHU_SPARK_NETWORK=mainnet\n"
+        "TMP_CASH_MINT_BACKEND=spark\n"
+        "TMP_CASH_SPARK_MNEMONIC_FILE=wallet.mnemonic\n"
+        "TMP_CASH_SPARK_API_KEY=test-key\n"
+        "TMP_CASH_SPARK_NETWORK=mainnet\n"
     )
     args = parse_args([])
     assert args.backend == "spark"
     assert args.spark_mnemonic_file == Path("wallet.mnemonic")
     assert args.spark_api_key == "test-key"
-    monkeypatch.setenv("CASHU_SPARK_NETWORK", "regtest")
+    monkeypatch.setenv("TMP_CASH_SPARK_NETWORK", "regtest")
     args = parse_args(["--spark-config-file", "local.json"])
     assert args.spark_network == "regtest"
     assert args.spark_config_file == Path("local.json")
@@ -201,7 +244,7 @@ def test_spark_configuration_uses_file_and_environment(tmp_path, monkeypatch):
 def test_mint_command_reports_balances_at_startup(tmp_path, monkeypatch, caplog):
     import logging
 
-    from cashu.server import main
+    from tmp_cash.server import main
 
     monkeypatch.setattr("sys.argv", ["mint", "--data", str(tmp_path / "mint")])
 
@@ -209,7 +252,7 @@ def test_mint_command_reports_balances_at_startup(tmp_path, monkeypatch, caplog)
         with TestClient(app) as http:
             assert http.get("/v1/info").status_code == 200
 
-    monkeypatch.setattr("cashu.server.uvicorn.run", run)
+    monkeypatch.setattr("tmp_cash.server.uvicorn.run", run)
     with caplog.at_level(logging.INFO, logger="uvicorn.error"):
         main()
     assert "Backend balances (fake):" in caplog.text
@@ -217,7 +260,7 @@ def test_mint_command_reports_balances_at_startup(tmp_path, monkeypatch, caplog)
 
 
 def test_startup_reports_old_database_without_resetting_it(tmp_path, monkeypatch):
-    from cashu.server import main
+    from tmp_cash.server import main
 
     data = tmp_path / "old-mint"
     data.mkdir()
@@ -228,13 +271,13 @@ def test_startup_reports_old_database_without_resetting_it(tmp_path, monkeypatch
         db.execute("INSERT INTO metadata VALUES ('protocol','ps-htlc-claim-v2')")
         db.execute("CREATE TABLE quotes (quote TEXT PRIMARY KEY)")
         db.execute("INSERT INTO quotes VALUES ('previous-claim')")
-    (tmp_path / ".env").write_text(f"CASHU_MINT_DATA={data}\n")
+    (tmp_path / ".env").write_text(f"TMP_CASH_MINT_DATA={data}\n")
     monkeypatch.setattr("sys.argv", ["mint"])
     with pytest.raises(SystemExit) as exc:
         main()
     message = str(exc.value)
     assert str(data / "mint.sqlite3") in message
-    assert "CASHU_MINT_DATA" in message
+    assert "TMP_CASH_MINT_DATA" in message
     assert "--data <new-directory>" in message
     assert (data / "mint.seed").read_bytes() == seed
     with sqlite3.connect(data / "mint.sqlite3") as db:

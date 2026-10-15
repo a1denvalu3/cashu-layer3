@@ -77,7 +77,7 @@ def create_app(
                     pass
             await mint.backend.close()
 
-    app = FastAPI(title="cashu3", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title="tmp.cash", version="0.2.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -139,7 +139,7 @@ def create_app(
             else None
         )
         return {
-            "name": "cashu3",
+            "name": "tmp.cash",
             "unit": "sat",
             "scheme": "PS/BLS12-381",
             "token_version": 3,

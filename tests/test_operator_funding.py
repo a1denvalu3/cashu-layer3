@@ -7,10 +7,10 @@ import pytest
 from conftest import SEED
 from fastapi.testclient import TestClient
 
-from cashu.api import create_app
-from cashu.lightning import FakeBackend, PaymentState
-from cashu.mint import Mint
-from cashu.models import OperatorFundingResponse
+from tmp_cash.api import create_app
+from tmp_cash.lightning import FakeBackend, PaymentState
+from tmp_cash.mint import Mint
+from tmp_cash.models import OperatorFundingResponse
 
 ADMIN_TOKEN = "test-only-operator-token-" + "a" * 32
 AUTH = {"Authorization": f"Bearer {ADMIN_TOKEN}"}

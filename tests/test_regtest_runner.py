@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 SPEC = importlib.util.spec_from_file_location(
-    "cashu_regtest_runner", Path(__file__).parent / "regtest/run.py"
+    "tmp_cash_regtest_runner", Path(__file__).parent / "regtest/run.py"
 )
 regtest = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = regtest

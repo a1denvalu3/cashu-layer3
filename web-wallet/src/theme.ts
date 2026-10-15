@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 export type ThemePreference = "system" | "light" | "dark";
+// Retain the saved preference for people upgrading the same browser origin.
 const preferenceKey = "layer3-theme";
 
 function savedPreference(): ThemePreference {

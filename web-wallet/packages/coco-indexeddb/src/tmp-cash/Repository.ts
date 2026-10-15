@@ -1,26 +1,27 @@
 import type { Table } from "dexie";
 import { IdbDb } from "../lib/db";
 import type {
-  Layer3Repository,
-  Layer3State,
-  Layer3Funding,
-  Layer3ProofRecord,
-  Layer3Operation,
-  Layer3Activity,
-  Layer3ProofState,
-} from "coco-cashu-core/layer3";
-import { validateLayer3State } from "./validation";
-import { psPreimageHash } from "@cashu/cashu-ts/layer3";
+  TmpCashRepository,
+  TmpCashState,
+  TmpCashFunding,
+  TmpCashProofRecord,
+  TmpCashOperation,
+  TmpCashActivity,
+  TmpCashProofState,
+} from "coco-cashu-core/tmp-cash";
+import { validateTmpCashState } from "./validation";
+import { psPreimageHash } from "@cashu/cashu-ts/tmp-cash";
 
 /** Separate PS schema: standard Coco secp256k1 proof tables are never reinterpreted. */
-export class Layer3IndexedDbRepository
+export class TmpCashIndexedDbRepository
   extends IdbDb
-  implements Layer3Repository
+  implements TmpCashRepository
 {
-  proofs!: Table<Layer3ProofRecord, string>;
-  operations!: Table<Layer3Operation, string>;
-  fundings!: Table<Layer3Funding, string>;
-  activity!: Table<Layer3Activity, string>;
+  proofs!: Table<TmpCashProofRecord, string>;
+  operations!: Table<TmpCashOperation, string>;
+  fundings!: Table<TmpCashFunding, string>;
+  activity!: Table<TmpCashActivity, string>;
+  // Keep the existing database identity so upgrades retain funds and operations.
   constructor(name = "cashu_layer3_wallet_v3") {
     super({ name });
     this.version(1).stores({
@@ -30,7 +31,7 @@ export class Layer3IndexedDbRepository
       activity: "id,mint,createdAt",
     });
   }
-  async read(): Promise<Layer3State> {
+  async read(): Promise<TmpCashState> {
     return this.runTransaction(
       "r",
       ["proofs", "operations", "fundings", "activity"],
@@ -42,15 +43,15 @@ export class Layer3IndexedDbRepository
       }),
     );
   }
-  async saveFunding(f: Layer3Funding): Promise<void> {
+  async saveFunding(f: TmpCashFunding): Promise<void> {
     await this.fundings.add(f);
   }
-  async updateFunding(f: Layer3Funding): Promise<void> {
+  async updateFunding(f: TmpCashFunding): Promise<void> {
     await this.fundings.put(f);
   }
   async reserve(
-    op: Layer3Operation,
-    inputs: Layer3ProofRecord[],
+    op: TmpCashOperation,
+    inputs: TmpCashProofRecord[],
   ): Promise<void> {
     await this.runTransaction("rw", ["operations", "proofs"], async () => {
       if (await this.operations.get(op.id))
@@ -96,8 +97,8 @@ export class Layer3IndexedDbRepository
   }
   async reserveMany(
     entries: {
-      operation: Layer3Operation;
-      inputs: Layer3ProofRecord[];
+      operation: TmpCashOperation;
+      inputs: TmpCashProofRecord[];
     }[],
   ): Promise<void> {
     await this.runTransaction("rw", ["operations", "proofs"], async () => {
@@ -106,9 +107,9 @@ export class Layer3IndexedDbRepository
     });
   }
   async complete(
-    op: Layer3Operation,
-    proofs: Layer3ProofRecord[],
-    activity: Layer3Activity,
+    op: TmpCashOperation,
+    proofs: TmpCashProofRecord[],
+    activity: TmpCashActivity,
   ): Promise<void> {
     await this.runTransaction(
       "rw",
@@ -136,7 +137,7 @@ export class Layer3IndexedDbRepository
       },
     );
   }
-  async release(op: Layer3Operation): Promise<void> {
+  async release(op: TmpCashOperation): Promise<void> {
     await this.runTransaction("rw", ["operations", "proofs"], async () => {
       const saved = await this.operations.get(op.id);
       if (!saved) return;
@@ -164,7 +165,7 @@ export class Layer3IndexedDbRepository
     await this.operations.update(id, { error: error.slice(0, 500) });
   }
   async updateProofStates(
-    changes: { id: string; state: Layer3ProofState }[],
+    changes: { id: string; state: TmpCashProofState }[],
   ): Promise<void> {
     await this.runTransaction("rw", ["proofs"], async () => {
       for (const { id, state } of changes) {
@@ -195,8 +196,8 @@ export class Layer3IndexedDbRepository
         await this.proofs.put({ ...p, proof: { ...p.proof, preimage } });
     });
   }
-  async importState(input: Layer3State): Promise<void> {
-    const state = validateLayer3State(input);
+  async importState(input: TmpCashState): Promise<void> {
+    const state = validateTmpCashState(input);
     await this.runTransaction(
       "rw",
       ["proofs", "operations", "fundings", "activity"],

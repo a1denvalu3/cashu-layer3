@@ -11,8 +11,8 @@ import {
   psNullifier,
   psPreimageHash,
   decodePSToken,
-} from "@cashu/cashu-ts/layer3";
-import type { Layer3State } from "coco-cashu-core/layer3";
+} from "@cashu/cashu-ts/tmp-cash";
+import type { TmpCashState } from "coco-cashu-core/tmp-cash";
 
 const mint = z.string().max(2048).transform(normalizePSMintUrl),
   date = z.number().int().nonnegative().safe();
@@ -71,7 +71,7 @@ const stateSchema = z
     activity: z.array(activity).max(100000),
   })
   .strict();
-export function validateLayer3State(input: unknown): Layer3State {
+export function validateTmpCashState(input: unknown): TmpCashState {
   const state = stateSchema.parse(input);
   const proofById = new Map(state.proofs.map((p) => [p.id, p]));
   const operationById = new Map(state.operations.map((op) => [op.id, op]));

@@ -15,7 +15,6 @@ import {
   Clock3,
   Copy,
   Download,
-  Box,
   Layers3,
   LoaderCircle,
   Monitor,
@@ -30,12 +29,12 @@ import {
 } from "lucide-react";
 import QRCode from "qrcode";
 import {
-  Layer3Manager,
-  type Layer3Activity,
-  type Layer3Funding,
-  type Layer3View,
-} from "coco-cashu-core/layer3";
-import { Layer3IndexedDbRepository } from "coco-cashu-indexeddb/layer3";
+  TmpCashManager,
+  type TmpCashActivity,
+  type TmpCashFunding,
+  type TmpCashView,
+} from "coco-cashu-core/tmp-cash";
+import { TmpCashIndexedDbRepository } from "coco-cashu-indexeddb/tmp-cash";
 import {
   decodePSToken,
   normalizePSMintUrl,
@@ -43,16 +42,18 @@ import {
   checkPSBacking,
   isPSPendingMeltError,
   type PSMeltQuote,
-} from "@cashu/cashu-ts/layer3";
+} from "@cashu/cashu-ts/tmp-cash";
 import { decryptBackup, encryptBackup, MAX_BACKUP_LENGTH } from "./backup";
 import { useTheme } from "./theme";
+import { TmpCashMark } from "./TmpCashMark";
 
-const repo = new Layer3IndexedDbRepository();
+const repo = new TmpCashIndexedDbRepository();
 const defaultMint =
   import.meta.env.VITE_DEFAULT_MINT || "http://127.0.0.1:3338";
 const initialMint = (() => {
   let saved: string | null = null;
   try {
+    // Retain the selected mint through the rebrand on this browser origin.
     saved = localStorage.getItem("layer3-mint");
   } catch {
     /* A blocked storage preference must not prevent the wallet from opening. */
@@ -136,7 +137,7 @@ function Modal({
       >
         <X size={20} />
       </button>
-      <span className="eyebrow">LAYER3 / WALLET</span>
+      <span className="eyebrow">tmp.cash / WALLET</span>
       <h2>{title}</h2>
       {subtitle && <p className="muted">{subtitle}</p>}
       {children}
@@ -207,7 +208,7 @@ function ActivityRow({
   row,
   showToken,
 }: {
-  row: Layer3Activity;
+  row: TmpCashActivity;
   showToken: (value: string) => void;
 }) {
   const incoming = row.purpose === "mint" || row.purpose === "receive";
@@ -259,8 +260,8 @@ export function App() {
   const { preference, theme, changePreference } = useTheme();
   const [mintUrl, setMintUrl] = useState(initialMint),
     [mintInput, setMintInput] = useState(initialMint);
-  const [manager, setManager] = useState<Layer3Manager | null>(null),
-    [view, setView] = useState<Layer3View | null>(null);
+  const [manager, setManager] = useState<TmpCashManager | null>(null),
+    [view, setView] = useState<TmpCashView | null>(null);
   const [tab, setTab] = useState<"wallet" | "activity" | "settings">("wallet"),
     [dialog, setDialog] = useState<Dialog>(null);
   const [busy, setBusy] = useState(false),
@@ -273,21 +274,21 @@ export function App() {
     [tokenText, setTokenText] = useState(""),
     [invoice, setInvoice] = useState("");
   const [quote, setQuote] = useState<PSMeltQuote | null>(null);
-  const [funding, setFunding] = useState<Layer3Funding | null>(null),
+  const [funding, setFunding] = useState<TmpCashFunding | null>(null),
     [password, setPassword] = useState(""),
     [backupFile, setBackupFile] = useState<File | null>(null);
   const [tick, setTick] = useState(0),
     [reconnect, setReconnect] = useState(0);
   const busyRef = useRef(false);
   const meltQuoteVersion = useRef(0);
-  const fundingRef = useRef<Layer3Funding | null>(null);
+  const fundingRef = useRef<TmpCashFunding | null>(null);
   useEffect(() => {
     fundingRef.current = funding;
   }, [funding]);
 
   useEffect(() => {
     let active = true;
-    const m = new Layer3Manager(repo, mintUrl);
+    const m = new TmpCashManager(repo, mintUrl);
     const update = async () => {
       const v = await m.view();
       if (active) setView(v);
@@ -501,11 +502,11 @@ export function App() {
   return (
     <div className="app-shell">
       <header className="header">
-        <a className="brand" href="/" aria-label="cashu3 (cashu cubed) home">
+        <a className="brand" href="/" aria-label="tmp.cash home">
           <span className="brand-mark">
-            <Box size={25} strokeWidth={1.6} />
+            <TmpCashMark size={25} strokeWidth={1.6} />
           </span>
-          cashu<span>³</span>
+          tmp<span>.cash</span>
           <sup>WALLET</sup>
         </a>
         <nav aria-label="Main navigation">
@@ -978,7 +979,7 @@ export function App() {
               <section className="settings-card">
                 <h2>Your mint</h2>
                 <p className="muted">
-                  Connect to a cashu3 mint that supports this wallet.
+                  Connect to a tmp.cash mint that supports this wallet.
                 </p>
                 <form onSubmit={switchMint}>
                   <label htmlFor="mint-url">Mint URL</label>
@@ -1053,12 +1054,12 @@ export function App() {
         <span>
           <span className="status-dot" /> YOUR KEYS LIVE HERE
         </span>
-        <span>cashu3 · Experimental HTLC ecash</span>
+        <span>tmp.cash · Experimental HTLC ecash</span>
         <a
           className="text-button small wallet-learn-link"
           href="/#how-it-works"
         >
-          How cashu³ works <ArrowUpRight size={13} />
+          How tmp.cash works <ArrowUpRight size={13} />
         </a>
       </footer>
       {dialog && (
@@ -1084,7 +1085,7 @@ export function App() {
               fund: "Fund a hold invoice. Your ecash appears when the payment is held.",
               send: "Create a fresh token to share. Send from one backing at a time.",
               receive:
-                "Paste a cashuPS token. We’ll refresh its proofs before adding it.",
+                "Paste an ecash token. We’ll refresh its proofs before adding it.",
               pay: "Redeem tokens from one or several backings.",
               backup: "Protect this file with a password you can remember.",
               restore: "Restore an encrypted backup into this empty wallet.",
@@ -1279,7 +1280,7 @@ export function App() {
                 className="token-input"
                 spellCheck={false}
                 rows={6}
-                placeholder="cashuPS…"
+                placeholder="Paste token…"
                 required
                 value={tokenText}
                 onChange={(e) => setTokenText(e.target.value)}
@@ -1468,7 +1469,7 @@ export function App() {
                       );
                     const link = document.createElement("a");
                     link.href = url;
-                    link.download = `cashu3-backup-${new Date().toISOString().slice(0, 10)}.json`;
+                    link.download = `tmp.cash-backup-${new Date().toISOString().slice(0, 10)}.json`;
                     link.click();
                     setTimeout(() => URL.revokeObjectURL(url), 1000);
                     setDialog(null);

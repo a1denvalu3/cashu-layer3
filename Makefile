@@ -4,13 +4,13 @@ test:
 	poetry run pytest -q
 
 check:
-	poetry run ruff check cashu tests examples
-	poetry run ruff format --check cashu tests examples
-	poetry run mypy cashu
+	poetry run ruff check tmp_cash tests examples
+	poetry run ruff format --check tmp_cash tests examples
+	poetry run mypy tmp_cash
 
 format:
-	poetry run ruff check --fix cashu tests examples
-	poetry run ruff format cashu tests examples
+	poetry run ruff check --fix tmp_cash tests examples
+	poetry run ruff format tmp_cash tests examples
 
 demo:
 	poetry run python examples/demo.py

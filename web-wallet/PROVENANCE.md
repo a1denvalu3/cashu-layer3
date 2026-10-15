@@ -13,24 +13,24 @@ are omitted. Each package retains its upstream license.
 | `packages/coco-indexeddb` | same Coco checkout, `packages/indexeddb` | same revision                                         | 1.1.2-rc.42  |
 
 cashu-ts 3.3.0 is the version this Coco revision targets. The upstream standard
-Cashu exports remain available. New `layer3` subpath and root exports add
+Cashu exports remain available. New `tmp-cash` subpath and root exports add
 `PSWallet`, PS wire schemas, token codecs, BOLT11 validation, and a byte-compatible
 TypeScript port of this repository's v3 PS credential/proof implementation.
 Cryptographic arithmetic, pairing, and hash-to-curve use pinned Noble libraries;
 the interoperability tests exercise the Python verifier directly.
 
-The Coco fork adds `Layer3Manager` and typed repository contracts. It follows
+The Coco fork adds `TmpCashManager` and typed repository contracts. It follows
 Coco's prepare/reserve/execute/finalize lifecycle and uses its original
-`EventBus`. The IndexedDB fork adds `Layer3IndexedDbRepository` on Coco's original
+`EventBus`. The IndexedDB fork adds `TmpCashIndexedDbRepository` on Coco's original
 `IdbDb` transaction wrapper. PS proofs have their own schema; standard Cashu
-proof rows are not reused. Root and `layer3` exports expose these additions.
+proof rows are not reused. Root and `tmp-cash` exports expose these additions.
 
 Workspace manifests expose TypeScript source to Vite and type checking, pin
 runtime dependencies, and link local forks. The ordinary upstream APIs are
 retained as source but are not exercised by this wallet's tests. No upstream
 checkout is changed and no package is published.
 
-The PS port derives from `cashu/crypto/ps.py`, `cashu/keyset.py`, `cashu/models.py`,
-and `cashu/client.py` in this repository. See the repository's root
+The PS port derives from `tmp_cash/crypto/ps.py`, `tmp_cash/keyset.py`, `tmp_cash/models.py`,
+and `tmp_cash/client.py` in this repository. See the repository's root
 `PROVENANCE.md` for its original cashu-nft attribution. The wallet app and these
 changes are covered by the root MIT license.

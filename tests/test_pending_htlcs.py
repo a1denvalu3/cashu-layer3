@@ -5,10 +5,10 @@ from dataclasses import replace
 
 import pytest
 
-from cashu.api import create_app
-from cashu.client import ClientError
-from cashu.db import BackendError
-from cashu.models import InvoiceState
+from tmp_cash.api import create_app
+from tmp_cash.client import ClientError
+from tmp_cash.db import BackendError
+from tmp_cash.models import InvoiceState
 
 
 @pytest.fixture(params=["time", "blocks"])
@@ -304,7 +304,7 @@ def test_background_recovery_claims_on_first_poll_at_or_after_deadline(
             await next_poll.wait()
             next_poll.clear()
 
-        monkeypatch.setattr("cashu.api.asyncio.sleep", sleep)
+        monkeypatch.setattr("tmp_cash.api.asyncio.sleep", sleep)
         deadline_clock(-1)
         app = create_app(service.mint)
         async with app.router.lifespan_context(app):

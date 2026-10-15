@@ -1,8 +1,11 @@
-import { validateLayer3State } from "coco-cashu-indexeddb/layer3";
-import { normalizePSMintUrl } from "@cashu/cashu-ts/layer3";
-import type { Layer3State } from "coco-cashu-core/layer3";
+import { validateTmpCashState } from "coco-cashu-indexeddb/tmp-cash";
+import { normalizePSMintUrl } from "@cashu/cashu-ts/tmp-cash";
+import type { TmpCashState } from "coco-cashu-core/tmp-cash";
 
 export const MAX_BACKUP_LENGTH = 16_000_000;
+
+// The serialized format and authenticated-data bytes remain stable across the
+// rebrand, allowing existing backups to be restored by tmp.cash.
 
 const toBase64 = (bytes: Uint8Array) =>
   btoa(Array.from(bytes, (n) => String.fromCharCode(n)).join(""));
@@ -31,7 +34,7 @@ async function key(
   );
 }
 export async function encryptBackup(
-  state: Layer3State,
+  state: TmpCashState,
   mint: string,
   password: string,
 ): Promise<string> {
@@ -41,7 +44,7 @@ export async function encryptBackup(
     JSON.stringify({
       version: 1,
       mint: normalizePSMintUrl(mint),
-      state: validateLayer3State(state),
+      state: validateTmpCashState(state),
     }),
   );
   if (contents.byteLength > MAX_BACKUP_LENGTH)
@@ -71,7 +74,7 @@ export async function encryptBackup(
 export async function decryptBackup(
   raw: string,
   password: string,
-): Promise<{ mint: string; state: Layer3State }> {
+): Promise<{ mint: string; state: TmpCashState }> {
   if (raw.length > MAX_BACKUP_LENGTH)
     throw new Error("Backup file is too large");
   const envelope = JSON.parse(raw);
@@ -110,6 +113,6 @@ export async function decryptBackup(
     throw new Error("Unsupported backup contents");
   return {
     mint: normalizePSMintUrl(contents.mint),
-    state: validateLayer3State(contents.state),
+    state: validateTmpCashState(contents.state),
   };
 }

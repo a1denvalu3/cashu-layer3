@@ -1,4 +1,4 @@
-/** Byte-compatible port of cashu/crypto/ps.py and cashu/keyset.py. */
+/** Byte-compatible port of tmp_cash/crypto/ps.py and tmp_cash/keyset.py. */
 import { bls12_381 as bls } from "@noble/curves/bls12-381.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, hexToBytes, concatBytes } from "@noble/hashes/utils.js";
