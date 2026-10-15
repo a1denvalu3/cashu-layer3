@@ -11,7 +11,7 @@ test.beforeEach(async ({ page }) => {
   }, mintUrl);
 });
 
-test("explains sharing, redemption, and expiry without connecting a wallet", async ({
+test("shows the frozen deposit and hidden ownership changes without connecting a wallet", async ({
   page,
 }) => {
   const mintRequests: string[] = [];
@@ -21,46 +21,138 @@ test("explains sharing, redemption, and expiry without connecting a wallet", asy
   });
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    /Lightning in\.\s*Cash around\.\s*Lightning out\./,
+    /Ecash from a\s*frozen deposit\./,
   );
-  const example = page.getByRole("region", {
-    name: /One hold\.\s*Two pockets\./,
-  });
-  const slider = example.getByRole("slider", { name: "Send to a friend" });
-  await slider.focus();
-  await slider.press("Home");
-  await slider.press("ArrowRight");
-  await expect(slider).toHaveValue("100");
-  await expect(example.locator(".example-pocket").first()).toContainText(
-    "900 sats",
-  );
-  await example.getByRole("button", { name: "Pay a 99 sat invoice" }).click();
-  await expect(slider).toBeDisabled();
-  await expect(example.getByRole("status")).toContainText(
-    "revealed the backing preimage",
-  );
-  await expect(example.locator(".friend")).toContainText("99 paid + 1 sat fee");
-  await example
-    .getByRole("button", { name: "Reach the redemption cutoff" })
-    .click();
-  await expect(example.getByRole("status")).toContainText(
-    "remaining 900 sats expire",
-  );
-  await expect(example.locator(".example-pocket").first()).toContainText(
-    "900 sats expired",
-  );
-  await example.getByRole("button", { name: "Start again" }).click();
-  await expect(slider).toBeEnabled();
-  await expect(example.locator(".friend")).toContainText("100 sats");
   await expect(
     page.getByRole("heading", {
-      name: "A held payment still needs a trusted mint.",
+      name: "The mint cannot collect your deposit.",
     }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Ecash transfers are private." }),
+  ).toBeVisible();
+  const expiry = page.getByRole("complementary", {
+    name: "Ecash has a deadline.",
+  });
+  await expect(expiry).toBeVisible();
+  await expect(expiry).toContainText("There is no remaining balance to claim.");
+  await expect(expiry).toContainText("does not reset the clock");
+  const diagram = page.getByRole("region", {
+    name: /Alice, the mint,\s*and Carol/,
+  });
+  const mint = diagram.getByRole("group", { name: "What the mint sees" });
+  await expect(mint).toContainText("Frozen in Lightning");
+  await expect(mint).toContainText("The mint cannot collect the deposit.");
+  const deposit = (await mint.locator(".example-backing").textContent())!;
+  await diagram.getByRole("button", { name: /Transfer/ }).focus();
+  await diagram.getByRole("button", { name: /Transfer/ }).press("Enter");
+  await expect(
+    diagram.getByRole("group", { name: "Carol", exact: true }),
+  ).toContainText("Has the ecash");
+  await expect(
+    diagram.getByRole("group", { name: "Alice’s ecash", exact: true }),
+  ).toContainText("750 sats");
+  await expect(
+    diagram.getByRole("group", { name: "Carol’s ecash", exact: true }),
+  ).toContainText("250 sats");
+  await expect(mint.locator(".example-backing")).toHaveText(deposit);
+  await expect(mint).toContainText("Request: refresh ecash");
+  await expect(mint).not.toContainText(/Alice|Carol/);
+  await expect(diagram.getByRole("status")).toContainText(
+    "cannot tell that ownership changed from Alice to Carol",
+  );
+  await diagram.screenshot({ path: "test-results/diagram-transfer.png" });
+  await diagram.getByRole("button", { name: /Redeem/ }).click();
+  await expect(mint).toContainText("Unlocked by redemption");
+  await expect(mint).toContainText("The mint can now collect the deposit.");
+  await expect(diagram.getByRole("status")).toContainText(
+    "redeems and burns her 250 sats of ecash",
+  );
+  await expect(
+    diagram.getByRole("group", { name: "Carol’s ecash", exact: true }),
+  ).toContainText("Burned");
+  await expect(
+    diagram.getByRole("group", { name: "Alice’s ecash", exact: true }),
+  ).not.toContainText("Burned");
+  await diagram.screenshot({ path: "test-results/diagram-redeem.png" });
+  await diagram.getByRole("button", { name: /miss the deadline/i }).click();
+  await expect(
+    diagram.getByRole("group", { name: "Alice’s ecash", exact: true }),
+  ).toContainText("Expired");
+  await expect(
+    diagram.getByRole("group", { name: "Carol’s ecash", exact: true }),
+  ).toContainText("Expired");
+  await expect(diagram.getByRole("status")).toContainText(
+    "can no longer be spent",
+  );
+  await expect(mint).toContainText("Reverted to sender");
+  await expect(mint).toContainText("Lightning hold timed out");
+  await expect(mint).toContainText("The mint never collected this deposit.");
+  await expect(
+    diagram.getByRole("group", { name: "Alice", exact: true }),
+  ).toContainText("Deposit returned");
+  await expect(mint).not.toContainText("Unlocked");
+  await diagram.screenshot({ path: "test-results/diagram-expiry.png" });
+  await page
+    .getByText("What changes when someone redeems?", { exact: true })
+    .click();
+  await expect(
+    page.getByText(
+      /the mint can collect the whole deposit, even if other people/,
+    ),
+  ).toBeVisible();
+  await page
+    .getByText("Can the mint see anything during a transfer?", { exact: true })
+    .click();
+  await expect(
+    page.getByText(/Those requests do not tell it whether ownership changed/),
   ).toBeVisible();
   expect(mintRequests).toEqual([]);
   expect(
     await page.evaluate(async () => (await indexedDB.databases()).length),
   ).toBe(0);
+});
+
+test("plays, pauses, and completes the animated explanation", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.clock.install();
+  await page.goto("/");
+  const diagram = page.getByRole("region", {
+    name: /Alice, the mint,\s*and Carol/,
+  });
+  await diagram.getByRole("button", { name: "Play explanation" }).click();
+  await page.clock.runFor(4500);
+  await expect(
+    diagram.getByRole("button", { name: /Transfer/ }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(diagram.locator(".diagram-private-line")).toHaveCSS(
+    "animation-play-state",
+    "running",
+  );
+  await diagram.getByRole("button", { name: "Pause explanation" }).click();
+  await expect(diagram.locator(".diagram-private-line")).toHaveCSS(
+    "animation-play-state",
+    "paused",
+  );
+  await page.clock.runFor(9000);
+  await expect(
+    diagram.getByRole("button", { name: /Transfer/ }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await diagram.getByRole("button", { name: "Play explanation" }).click();
+  await page.clock.runFor(4500);
+  await expect(
+    diagram.getByRole("group", { name: "What the mint sees" }),
+  ).toContainText("Frozen in Lightning");
+  await page.clock.runFor(4500);
+  await expect(
+    diagram.getByRole("group", { name: "What the mint sees" }),
+  ).toContainText("Unlocked by redemption");
+  await page.clock.runFor(4500);
+  await expect(
+    diagram.getByRole("button", { name: "Play explanation" }),
+  ).toHaveAttribute("aria-pressed", "false");
 });
 
 test("opens the wallet and keeps its funds and theme across visits to the explainer", async ({
@@ -115,7 +207,7 @@ test("serves a direct wallet entry and distinct page metadata", async ({
   expect(landing.ok()).toBe(true);
   expect(wallet.ok()).toBe(true);
   expect(await landing.text()).toContain(
-    "<title>cashu3 — Lightning in. Cash around. Lightning out.</title>",
+    "<title>cashu3 — Ecash from a frozen deposit</title>",
   );
   expect(await wallet.text()).toContain(
     "<title>cashu3 wallet — Cash with a deadline</title>",
@@ -148,6 +240,13 @@ test("keeps the landing page usable on narrow screens in both themes", async ({
         "data-theme",
         colorScheme,
       );
+      await page.getByRole("button", { name: /miss the deadline/i }).click();
+      await expect(
+        page.getByRole("group", { name: "Alice’s ecash", exact: true }),
+      ).toContainText("Expired");
+      await expect(
+        page.getByRole("group", { name: "Carol’s ecash", exact: true }),
+      ).toContainText("Expired");
       expect(
         await page.evaluate(
           () => document.documentElement.scrollWidth <= window.innerWidth,
@@ -162,6 +261,7 @@ test("keeps the landing page usable on narrow screens in both themes", async ({
       expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
     }
   }
+  await page.getByRole("button", { name: /Deposit/ }).click();
   await page.emulateMedia({ colorScheme: "light" });
   await page.screenshot({
     path: "test-results/landing-desktop.png",

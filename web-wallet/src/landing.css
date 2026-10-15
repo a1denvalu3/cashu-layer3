@@ -114,8 +114,13 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  color: var(--muted);
-  font-size: 10px;
+  color: var(--warning-text);
+  background: var(--warning-surface);
+  border: 1px solid var(--warning-line);
+  border-radius: 8px;
+  padding: 11px 13px;
+  max-width: 405px;
+  font-size: 12px;
   margin-top: 22px;
 }
 .landing-art {
@@ -362,7 +367,7 @@
 }
 .landing-steps {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 30px;
   margin-top: 47px;
 }
@@ -387,13 +392,44 @@
   letter-spacing: -0.3px;
 }
 .landing-step h3 {
-  margin: 21px 0 10px;
+  font-size: 24px;
+  letter-spacing: -0.7px;
+  margin: 21px 0 14px;
 }
 .landing-step p {
+  max-width: 460px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.85;
   margin: 0;
+}
+.expiry-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  padding: 25px 28px;
+  margin-top: 34px;
+  border: 1px solid var(--warning-line);
+  border-radius: 12px;
+  background: var(--warning-surface);
+  color: var(--warning-text);
+}
+.expiry-note > svg {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.expiry-note h3 {
+  margin: 0 0 8px;
+  font-size: 20px;
+}
+.expiry-note p {
+  max-width: 820px;
+  font-size: 13px;
+  margin: 0;
+}
+.expiry-note p + p {
+  margin-top: 8px;
+  font-weight: 500;
 }
 .sats-example {
   display: grid;
@@ -441,15 +477,53 @@
 .example-backing div > span {
   font-size: 10px;
 }
-.example-indicator {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent-text);
-  margin-left: auto;
+.example-mint-view {
+  padding: 20px;
+  border: 1px solid var(--accent-line);
+  border-radius: 10px;
+  margin-top: 28px;
 }
-.example-indicator.closed {
-  background: var(--muted);
+.example-mint-view > .eyebrow {
+  color: var(--accent-text);
+  font-size: 8px;
+}
+.example-mint-view .example-backing {
+  border: 0;
+  padding-top: 16px;
+}
+.example-mint-view > p {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 15px 0 0;
+}
+.example-request {
+  display: block;
+  font-size: 10px;
+  margin-top: 10px;
+  color: var(--accent-text);
+}
+.example-hidden {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--accent-text);
+  margin-top: 22px;
+}
+.example-hidden svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.example-hidden p {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--muted);
+  margin: 0;
+}
+.example-hidden strong {
+  font-weight: 500;
+  color: var(--ink);
 }
 .example-intro > .example-disclaimer {
   font-size: 9px;
@@ -459,134 +533,249 @@
   padding: 35px 36px 27px;
   min-width: 0;
 }
-.example-progress {
+.diagram-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.diagram-controls button {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 7px;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font-size: 11px;
+  background: transparent;
   color: var(--muted);
+}
+.diagram-controls button > span {
   font:
     9px "DM Mono",
     monospace;
-  margin-bottom: 29px;
 }
-.example-progress .active {
-  color: var(--accent-text);
-}
-.landing .example-slider-label {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 11px;
-  margin-bottom: 13px;
-}
-.example-slider-label > strong {
-  font-weight: 500;
-}
-.landing .example-slider {
-  display: block;
-  width: 100%;
-  accent-color: var(--landing-accent);
-  padding: 0;
-  margin: 0 0 18px;
-  height: 24px;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-}
-.landing .example-slider:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-.example-pockets {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-.example-pocket {
-  display: flex;
-  flex-direction: column;
-  padding: 17px 18px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--subtle);
-}
-.example-pocket.friend {
+.diagram-controls button[aria-pressed="true"] {
   background: var(--soft-green);
   border-color: var(--accent-line);
+  color: var(--ink);
 }
-.example-pocket > span:first-child {
-  font-size: 10px;
+.transfer-diagram {
+  position: relative;
+  isolation: isolate;
+  height: 300px;
+  margin-top: 20px;
+}
+.diagram-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+  overflow: visible;
+}
+.diagram-lines path {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
+}
+.diagram-lines .diagram-private-line {
+  stroke: var(--accent-text);
+  stroke-dasharray: 5 8;
+  opacity: 0.35;
+}
+.diagram-lines .diagram-mint-line {
+  opacity: 0;
+}
+.diagram-step-1 .diagram-private-line,
+.diagram-step-1 .diagram-mint-line,
+.diagram-step-2 .diagram-mint-line {
+  stroke: var(--accent-text);
+  stroke-dasharray: 5 8;
+  opacity: 1;
+  animation: diagram-flow 1s linear infinite;
+  animation-play-state: paused;
+}
+.transfer-diagram[data-playing="true"] .diagram-private-line,
+.transfer-diagram[data-playing="true"] .diagram-mint-line {
+  animation-play-state: running;
+}
+.diagram-step-2 .diagram-deposit-line {
+  stroke: var(--accent-text);
+}
+.diagram-step-3 .diagram-deposit-line {
+  stroke: var(--warning-text);
+  stroke-dasharray: 5 8;
+  animation: diagram-flow 1s linear reverse 2;
+}
+@keyframes diagram-flow {
+  to {
+    stroke-dashoffset: -26;
+  }
+}
+.diagram-node {
+  position: absolute;
+  top: 58%;
+  left: 18%;
+  transform: translate(-50%, -50%);
+  width: 92px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.diagram-mint {
+  top: 17%;
+  left: 50%;
+}
+.diagram-carol {
+  left: 82%;
+}
+.diagram-avatar {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 50%;
   color: var(--muted);
+  font-size: 13px;
 }
-.example-pocket > strong {
-  font-size: 36px;
+.diagram-mint .diagram-avatar {
+  border-radius: 10px;
+}
+.has-ecash .diagram-avatar {
+  background: var(--soft-green);
+  color: var(--accent-text);
+  border-color: var(--accent-line);
+}
+.diagram-node strong {
+  font-size: 12px;
   font-weight: 500;
-  letter-spacing: -1.5px;
-  margin: 7px 0 10px;
+  margin-top: 7px;
 }
-.example-pocket > strong > span {
-  font-size: 11px;
-  letter-spacing: 0;
-  color: var(--muted);
-}
-.example-pocket > span:last-child {
+.diagram-node > span:last-child:not(.diagram-avatar) {
   font-size: 9px;
   color: var(--muted);
+  min-height: 14px;
+  margin-top: 3px;
 }
-.example-pocket.expired {
+.diagram-lock,
+.diagram-request {
+  position: absolute;
+  top: 33%;
+  left: 32%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9px;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--muted);
+}
+.diagram-request {
+  left: 68%;
+  color: var(--accent-text);
+}
+.diagram-step-2 .diagram-lock {
+  border-color: var(--accent-line);
+  color: var(--accent-text);
+}
+.diagram-cash {
+  position: absolute;
+  top: 85%;
+  left: 18%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 5px;
+  width: 108px;
+  padding: 10px;
+  border: 1px solid var(--accent-line);
+  border-radius: 9px;
+  background: var(--soft-green);
+  color: var(--accent-text);
+  box-shadow: 0 5px 12px var(--shadow);
+  transition:
+    left 900ms ease-in-out,
+    background 300ms;
+}
+.diagram-cash strong {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.diagram-cash > span {
+  flex-basis: 100%;
+  font-size: 9px;
+  text-align: center;
+}
+.diagram-step-1 .diagram-cash,
+.diagram-step-2 .diagram-cash,
+.diagram-step-3 .diagram-cash {
+  left: 82%;
+}
+.diagram-step-2 .diagram-moving-cash {
+  background: var(--surface);
+  border-style: dashed;
+  box-shadow: none;
+  color: var(--muted);
+}
+.diagram-step-0 .diagram-cash {
+  transition: none;
+}
+.diagram-step-3 .diagram-cash {
+  background: var(--warning-surface);
+  border-color: var(--warning-line);
+  box-shadow: none;
+  color: var(--warning-text);
+}
+.diagram-step-3 .diagram-cash strong {
+  color: var(--warning-text);
+}
+.transfer-diagram .diagram-alice-cash {
+  left: 18%;
+  transition: none;
+}
+.diagram-step-3 .diagram-lock {
+  color: var(--warning-text);
   border-color: var(--warning-line);
   background: var(--warning-surface);
 }
-.example-pocket.expired > span:last-child {
-  color: var(--warning-text);
-}
 .example-explanation {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  color: var(--muted);
-  min-height: 83px;
-  margin-top: 22px;
-}
-.example-explanation svg {
-  flex-shrink: 0;
-  color: var(--accent-text);
-  margin-top: 2px;
+  min-height: 86px;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
 }
 .example-explanation p {
-  font-size: 11px;
+  font-size: 12px;
+  color: var(--muted);
   line-height: 1.8;
   margin: 0;
 }
-.example-actions {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-  min-height: 46px;
-}
-.landing .example-actions .button {
-  font-size: 11px;
-  padding-inline: 15px;
-  gap: 14px;
-}
-.example-reset {
-  font-size: 10px;
+.diagram-play {
   min-height: 44px;
-}
-.example-complete {
   font-size: 11px;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--accent-text);
+  margin-top: 10px;
 }
-.example-fee {
-  font-size: 9px;
-  line-height: 1.8;
-  color: var(--muted);
-  margin: 15px 0 0;
+.diagram-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 24px;
+}
+.diagram-expire {
+  color: var(--warning-text);
+  font-size: 11px;
+  min-height: 44px;
+  margin-top: 10px;
 }
 .landing-rules {
   display: grid;
@@ -600,39 +789,42 @@
   color: var(--muted);
   margin: 21px 0;
 }
-.rules-tag {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--accent-text);
-  font:
-    8px "DM Mono",
-    monospace;
-  letter-spacing: 0.6px;
-  margin-top: 30px;
-}
-.rules-list article {
-  display: flex;
-  align-items: flex-start;
-  gap: 21px;
-  padding: 23px 0;
+.rules-list details {
   border-bottom: 1px solid var(--line);
 }
-.rules-list article:first-child {
+.rules-list details:first-child {
   border-top: 1px solid var(--line);
 }
-.rules-list article > .mono {
-  font-size: 10px;
-  color: var(--accent-text);
-  margin-top: 4px;
+.rules-list summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 23px 0;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  list-style: none;
 }
-.rules-list h3 {
-  margin: 0 0 9px;
+.rules-list summary::-webkit-details-marker {
+  display: none;
+}
+.rules-list summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 5px;
+}
+.rules-list summary svg {
+  flex-shrink: 0;
+  color: var(--muted);
+  transition: transform 180ms;
+}
+.rules-list details[open] summary svg {
+  transform: rotate(180deg);
 }
 .rules-list p {
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.8;
-  margin: 0;
+  margin: -6px 0 24px;
   color: var(--muted);
 }
 .landing-ready {
@@ -730,9 +922,6 @@
   .example-intro h2 {
     font-size: 38px;
   }
-  .example-pocket {
-    padding: 15px 12px;
-  }
   .landing-rules {
     gap: 50px;
   }
@@ -785,6 +974,7 @@
   }
   .hero-deadline {
     margin-top: 20px;
+    font-size: 11px;
   }
   .landing-art {
     width: min(100%, 430px);
@@ -832,16 +1022,26 @@
     letter-spacing: -1.3px;
   }
   .landing-steps {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: 1fr;
     margin-top: 29px;
     gap: 26px 23px;
   }
   .landing-step h3 {
-    font-size: 14px;
+    font-size: 22px;
     margin-top: 16px;
   }
   .landing-step p {
-    font-size: 11px;
+    font-size: 13px;
+  }
+  .expiry-note {
+    padding: 21px 19px;
+    gap: 12px;
+  }
+  .expiry-note h3 {
+    font-size: 18px;
+  }
+  .expiry-note p {
+    font-size: 12px;
   }
   .sats-example {
     grid-template-columns: 1fr;
@@ -870,8 +1070,33 @@
   .example-explanation {
     min-height: 96px;
   }
-  .example-pocket > strong {
-    font-size: 32px;
+  .diagram-controls button {
+    gap: 5px;
+    font-size: 10px;
+  }
+  .diagram-controls button > span {
+    font-size: 8px;
+  }
+  .diagram-node {
+    width: 68px;
+  }
+  .diagram-cash {
+    width: 84px;
+    padding: 7px;
+    gap: 4px;
+  }
+  .diagram-cash strong {
+    font-size: 11px;
+  }
+  .diagram-cash > svg {
+    width: 14px;
+    height: 14px;
+  }
+  .diagram-lock,
+  .diagram-request {
+    font-size: 8px;
+    padding: 6px 5px;
+    gap: 3px;
   }
   .landing-rules {
     grid-template-columns: 1fr;
@@ -881,13 +1106,6 @@
   .rules-intro p {
     max-width: 400px;
     margin-bottom: 0;
-  }
-  .rules-tag {
-    margin-top: 20px;
-  }
-  .rules-list article {
-    gap: 15px;
-    padding: 22px 0;
   }
   .landing-ready {
     display: block;
@@ -943,7 +1161,7 @@
     font-size: 10px;
   }
   .hero-deadline {
-    font-size: 9px;
+    font-size: 10px;
   }
   .landing-art {
     height: 405px;
@@ -964,15 +1182,6 @@
   .example-intro,
   .example-playground {
     padding: 23px 19px;
-  }
-  .example-pockets {
-    gap: 9px;
-  }
-  .example-pocket {
-    padding: 14px 10px;
-  }
-  .example-pocket > span:last-child {
-    font-size: 8px;
   }
   .landing-ready {
     padding: 29px 23px;

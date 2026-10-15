@@ -38,9 +38,13 @@ over HTTPS and use an HTTPS mint; browsers block mixed-content requests.
 
 ## Use
 
-- **Landing page:** explains funding, private transfers, redemption, expiry, and
-  mint trust, with an interactive 1,000-sat example. It opens without connecting
-  to a mint or initializing wallet storage. **Open wallet** takes you to the
+- **Landing page:** explains frozen Lightning deposits and private ecash
+  transfers, with an animated Alice–mint–Carol diagram showing what the mint sees
+  and what stays hidden. Its alternative deadline scenario expires both holders’
+  ecash and reverts the deposit to Alice after the Lightning hold times out.
+  Expiry is explained above the diagram. Further questions cover redemption and
+  mint trust. It opens without connecting to a mint or initializing wallet
+  storage. **Open wallet** takes you to the
   wallet; **How cashu³ works** in the wallet footer returns to the explainer.
 - **Add sats:** generates and durably saves a backing preimage, requests a HODL
   invoice with its hash, and displays the invoice/QR. Pay from a Lightning wallet.
