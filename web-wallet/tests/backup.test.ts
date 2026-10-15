@@ -29,3 +29,22 @@ it("encrypts authenticated backups and rejects a wrong password or tampering", a
     encryptBackup(empty, "http://localhost:3338", "short"),
   ).rejects.toThrow("12");
 });
+
+it("refuses to export a backup that exceeds the restore limit", async () => {
+  const state: Layer3State = {
+    ...empty,
+    activity: Array.from({ length: 100_000 }, (_, i) => ({
+      id: i.toString(16).padStart(64, "0"),
+      mint: "http://localhost:3338",
+      purpose: "mint",
+      amount: 1,
+      createdAt: 1,
+      state: "complete",
+      token: null,
+      receipt: null,
+    })),
+  };
+  await expect(
+    encryptBackup(state, "http://localhost:3338", "a test backup passphrase"),
+  ).rejects.toThrow("too large");
+});
