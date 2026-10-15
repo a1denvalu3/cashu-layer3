@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from .cache import SuccessfulResponseCache
 from .db import BackendError, MintError
 from .mint import Mint
 from .models import (
@@ -37,6 +38,8 @@ def create_app(
     report_balances: bool = False,
     admin_token: str | None = None,
 ) -> FastAPI:
+    responses = SuccessfulResponseCache()
+
     async def reconcile():
         while True:
             try:
@@ -75,6 +78,7 @@ def create_app(
                     await task
                 except asyncio.CancelledError:
                     pass
+            responses.clear()
             await mint.backend.close()
 
     app = FastAPI(title="tmp.cash", version="0.2.0", lifespan=lifespan)
@@ -175,11 +179,11 @@ def create_app(
 
     @app.post("/v1/mint/bolt11", response_model=SignaturesResponse)
     async def issue(request: MintRequest):
-        return await mint.mint(request)
+        return await responses.run("mint", request, lambda: mint.mint(request))
 
     @app.post("/v1/swap", response_model=SignaturesResponse)
     async def swap(request: SwapRequest):
-        return mint.swap(request)
+        return await responses.run("swap", request, lambda: mint.swap(request))
 
     @app.post("/v1/checkstate", response_model=CheckResponse)
     async def check(request: CheckRequest):
@@ -191,6 +195,6 @@ def create_app(
 
     @app.post("/v1/melt/bolt11", response_model=MeltResponse)
     async def melt(request: MeltRequest):
-        return await mint.melt(request)
+        return await responses.run("melt", request, lambda: mint.melt(request))
 
     return app

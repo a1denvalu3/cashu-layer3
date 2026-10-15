@@ -523,6 +523,14 @@ FastAPI provides schemas at `/docs`.
 | `POST /v1/melt/bolt11` | Combined melt and original-HTLC fee change |
 | `POST /v1/checkstate` | `UNSPENT`, `PENDING`, or `SPENT` nullifier states |
 
+Successful mint, swap and melt POST responses are cached in memory per server
+process for five minutes, with at most 1,024 entries and 16 MiB of serialized
+responses. Retries with the same validated request reuse the response, and
+concurrent identical requests share successful work. Errors and pending melts
+are not cached. Quotes and state queries always reach the mint. The cache is an
+optimization; durable database recovery still handles retries after eviction,
+expiry or restart.
+
 Batches allow up to 256 inputs or outputs; melt change commitments also have a
 256-slot limit. For very large mixed-HTLC batches, use smaller payments or select
 fewer inputs. Bearer bundles use experimental `cashuPS` JSON/base64 encoding,
