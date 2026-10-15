@@ -717,9 +717,7 @@
   font-size: 9px;
   text-align: center;
 }
-.diagram-step-1 .diagram-cash,
-.diagram-step-2 .diagram-cash,
-.diagram-step-3 .diagram-cash {
+.transfer-diagram[data-transferred="true"] .diagram-moving-cash {
   left: 82%;
 }
 .diagram-step-2 .diagram-moving-cash {

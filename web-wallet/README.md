@@ -40,8 +40,9 @@ over HTTPS and use an HTTPS mint; browsers block mixed-content requests.
 
 - **Landing page:** explains frozen Lightning deposits and private ecash
   transfers, with an animated Alice–mint–Carol diagram showing what the mint sees
-  and what stays hidden. Its alternative deadline scenario expires both holders’
-  ecash and reverts the deposit to Alice after the Lightning hold times out.
+  and what stays hidden. Its alternative deadline scenario expires Alice’s full
+  balance before a transfer, or both holders’ balances after a transfer, and
+  reverts the deposit to Alice after the Lightning hold times out.
   Expiry is explained above the diagram. Further questions cover redemption and
   mint trust. It opens without connecting to a mint or initializing wallet
   storage. **Open wallet** takes you to the

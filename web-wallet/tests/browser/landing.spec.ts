@@ -113,6 +113,59 @@ test("shows the frozen deposit and hidden ownership changes without connecting a
   ).toBe(0);
 });
 
+test("expires the balance held at the selected step without inventing a transfer", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const diagram = page.getByRole("region", {
+    name: /Alice, the mint,\s*and Carol/,
+  });
+  const aliceCash = diagram.getByRole("group", {
+    name: "Alice’s ecash",
+    exact: true,
+  });
+  const carolCash = diagram.getByRole("group", {
+    name: "Carol’s ecash",
+    exact: true,
+  });
+  for (const step of ["Deposit", "Transfer", "Deposit"]) {
+    await diagram.getByRole("button", { name: new RegExp(step) }).click();
+    await diagram.getByRole("button", { name: /miss the deadline/i }).click();
+    // Repeating the action must preserve the balance that actually expired.
+    await diagram.getByRole("button", { name: /miss the deadline/i }).click();
+    await expect(aliceCash).toContainText(
+      step === "Deposit" ? "1,000 sats" : "750 sats",
+    );
+    await expect(aliceCash).toContainText("Expired");
+    if (step === "Deposit") {
+      await expect(carolCash).toHaveCount(0);
+      await expect(
+        diagram.getByRole("group", { name: "Carol", exact: true }),
+      ).not.toContainText("Ecash expired");
+      await expect(diagram.getByRole("status")).toContainText(
+        "Alice’s 1,000 sats of ecash expire",
+      );
+      const cashBounds = (await aliceCash.boundingBox())!;
+      const aliceBounds = (await diagram
+        .getByRole("group", { name: "Alice", exact: true })
+        .boundingBox())!;
+      expect(cashBounds.x + cashBounds.width / 2).toBeCloseTo(
+        aliceBounds.x + aliceBounds.width / 2,
+        0,
+      );
+      await diagram.screenshot({
+        path: "test-results/diagram-deposit-expiry.png",
+      });
+    } else {
+      await expect(carolCash).toContainText("250 sats");
+      await expect(carolCash).toContainText("Expired");
+    }
+    await expect(
+      diagram.getByRole("group", { name: "What the mint sees" }),
+    ).toContainText("Reverted to sender");
+  }
+});
+
 test("plays, pauses, and completes the animated explanation", async ({
   page,
 }) => {
@@ -240,18 +293,31 @@ test("keeps the landing page usable on narrow screens in both themes", async ({
         "data-theme",
         colorScheme,
       );
-      await page.getByRole("button", { name: /miss the deadline/i }).click();
-      await expect(
-        page.getByRole("group", { name: "Alice’s ecash", exact: true }),
-      ).toContainText("Expired");
-      await expect(
-        page.getByRole("group", { name: "Carol’s ecash", exact: true }),
-      ).toContainText("Expired");
-      expect(
-        await page.evaluate(
-          () => document.documentElement.scrollWidth <= window.innerWidth,
-        ),
-      ).toBe(true);
+      for (const step of ["Deposit", "Transfer"]) {
+        await page.getByRole("button", { name: new RegExp(step) }).click();
+        await page.getByRole("button", { name: /miss the deadline/i }).click();
+        const aliceCash = page.getByRole("group", {
+          name: "Alice’s ecash",
+          exact: true,
+        });
+        const carolCash = page.getByRole("group", {
+          name: "Carol’s ecash",
+          exact: true,
+        });
+        await expect(aliceCash).toContainText("Expired");
+        if (step === "Deposit") {
+          await expect(aliceCash).toContainText("1,000 sats");
+          await expect(carolCash).toHaveCount(0);
+        } else {
+          await expect(aliceCash).toContainText("750 sats");
+          await expect(carolCash).toContainText("Expired");
+        }
+        expect(
+          await page.evaluate(
+            () => document.documentElement.scrollWidth <= window.innerWidth,
+          ),
+        ).toBe(true);
+      }
       const open = page
         .locator(".landing-header")
         .getByRole("link", { name: "Open wallet" });

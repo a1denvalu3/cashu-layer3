@@ -95,8 +95,14 @@ const explanations = [
 function TransferDiagram() {
   const [step, setStep] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [expiredAfterTransfer, setExpiredAfterTransfer] = useState(false);
   const redeemed = step === 2;
   const expired = step === 3;
+  const transferred = expired ? expiredAfterTransfer : step > 0;
+  const explanation =
+    expired && !transferred
+      ? "Alice’s 1,000 sats of ecash expire and can no longer be spent. When the Lightning hold times out, the 1,000 sat deposit reverts to Alice. The mint never collected it."
+      : explanations[step];
 
   useEffect(() => {
     if (!playing) return;
@@ -195,6 +201,7 @@ function TransferDiagram() {
         <div
           className={`transfer-diagram diagram-step-${step}`}
           data-playing={playing}
+          data-transferred={transferred}
           role="group"
           aria-label="Alice, mint, and Carol"
         >
@@ -256,12 +263,12 @@ function TransferDiagram() {
                 ? "Has the ecash"
                 : redeemed
                   ? "Gets Lightning"
-                  : expired
+                  : expired && transferred
                     ? "Ecash expired"
                     : ""}
             </span>
           </div>
-          {step > 0 && (
+          {transferred && (
             <div
               className="diagram-cash diagram-alice-cash"
               role="group"
@@ -279,14 +286,14 @@ function TransferDiagram() {
           <div
             className="diagram-cash diagram-moving-cash"
             role="group"
-            aria-label={step === 0 ? "Alice’s ecash" : "Carol’s ecash"}
+            aria-label={transferred ? "Carol’s ecash" : "Alice’s ecash"}
           >
             {expired ? (
               <Clock3 size={17} aria-hidden="true" />
             ) : (
               <Layers3 size={17} aria-hidden="true" />
             )}
-            <strong>{step === 0 ? "1,000 sats" : "250 sats"}</strong>
+            <strong>{transferred ? "250 sats" : "1,000 sats"}</strong>
             <span>{expired ? "Expired" : redeemed ? "Burned" : "Ecash"}</span>
           </div>
         </div>
@@ -296,7 +303,7 @@ function TransferDiagram() {
           aria-live="polite"
           aria-atomic="true"
         >
-          <p>{explanations[step]}</p>
+          <p>{explanation}</p>
         </div>
         <div className="diagram-actions">
           <button
@@ -322,6 +329,7 @@ function TransferDiagram() {
             aria-pressed={expired}
             onClick={() => {
               setPlaying(false);
+              if (!expired) setExpiredAfterTransfer(transferred);
               setStep(3);
             }}
           >
