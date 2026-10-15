@@ -19,6 +19,11 @@ test.beforeEach(async ({ page }) => {
   );
 });
 
+test.afterEach(async ({ page }) => {
+  // Finish intercepted refreshes before Playwright closes their request context.
+  await page.unrouteAll({ behavior: "wait" });
+});
+
 async function issueToken(page: Page, amount = 8): Promise<PSToken> {
   const wallet = new PSWallet(mintUrl);
   await wallet.loadMint();
