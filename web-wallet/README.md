@@ -65,8 +65,13 @@ over HTTPS and use an HTTPS mint; browsers block mixed-content requests.
   is lost or the tab closes. Tokens from another mint require explicitly
   connecting to that mint first. A backing without a preimage offers an
   **Add backing preimage** action.
-- **Pay with Lightning:** verifies the signed BOLT11 invoice, requests the mint's
-  fee quote, and shows its amount and the mint's fee reserve. The wallet reserves
+- **Pay with Lightning:** paste an invoice, scan its QR code with your camera,
+  or upload a QR image. Camera scanning requires HTTPS or localhost and camera
+  permission. Plain invoices and `lightning:` QR payloads are supported, including
+  uppercase invoices. Scanning fills the invoice field; choose **Review payment**
+  to check the amount and fees before confirming. The wallet verifies the signed
+  BOLT11 invoice, requests the mint's fee quote, and shows its amount and the
+  mint's fee reserve. The wallet reserves
   enough ecash for that quote and combines eligible backings when necessary. Each melt
   reveals the complete preimage of every backing used. Change stays tied to its
   original backing; expired change is shown in the payment receipt.

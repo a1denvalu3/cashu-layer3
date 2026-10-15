@@ -1058,6 +1058,33 @@ input[type="file"] {
   font-size: 9px;
   word-break: break-all;
 }
+.invoice-scanner {
+  margin-top: 12px;
+}
+.invoice-scan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.invoice-scan-actions .button {
+  flex: 1 1 auto;
+}
+.invoice-scan-actions input[hidden] {
+  display: none;
+}
+.invoice-camera {
+  position: relative;
+  margin-top: 12px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #000000;
+}
+.invoice-camera video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+}
 .qr {
   display: block;
   margin: 23px auto;

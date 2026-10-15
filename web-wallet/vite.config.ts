@@ -15,7 +15,7 @@ export default defineConfig(({ command }) => ({
                 attrs: {
                   "http-equiv": "Content-Security-Policy",
                   content:
-                    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self' http: https:; object-src 'none'; base-uri 'self'; form-action 'none'",
+                    "default-src 'self'; script-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self' http: https:; object-src 'none'; base-uri 'self'; form-action 'none'",
                 },
                 injectTo: "head" as const,
               },
