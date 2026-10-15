@@ -44,7 +44,7 @@ import {
   isPSPendingMeltError,
   type PSMeltQuote,
 } from "@cashu/cashu-ts/layer3";
-import { decryptBackup, encryptBackup } from "./backup";
+import { decryptBackup, encryptBackup, MAX_BACKUP_LENGTH } from "./backup";
 import { useTheme } from "./theme";
 
 const repo = new Layer3IndexedDbRepository();
@@ -279,6 +279,7 @@ export function App() {
   const [tick, setTick] = useState(0),
     [reconnect, setReconnect] = useState(0);
   const busyRef = useRef(false);
+  const meltQuoteVersion = useRef(0);
   const fundingRef = useRef<Layer3Funding | null>(null);
   useEffect(() => {
     fundingRef.current = funding;
@@ -403,6 +404,7 @@ export function App() {
     }
   }
   function open(next: Dialog) {
+    meltQuoteVersion.current += 1;
     setError("");
     setNotice("");
     setAmount("");
@@ -1300,13 +1302,14 @@ export function App() {
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
-                  run(async () =>
-                    setQuote(
-                      await manager!.meltQuote(
-                        invoice.trim().replace(/^lightning:/i, ""),
-                      ),
-                    ),
-                  );
+                  const version = ++meltQuoteVersion.current;
+                  run(async () => {
+                    const nextQuote = await manager!.meltQuote(
+                      invoice.trim().replace(/^lightning:/i, ""),
+                    );
+                    if (meltQuoteVersion.current === version)
+                      setQuote(nextQuote);
+                  });
                 }}
               >
                 <label htmlFor="pay-invoice">Lightning invoice</label>
@@ -1318,7 +1321,10 @@ export function App() {
                   required
                   placeholder="lnbc…"
                   value={invoice}
-                  onChange={(e) => setInvoice(e.target.value)}
+                  onChange={(e) => {
+                    meltQuoteVersion.current += 1;
+                    setInvoice(e.target.value);
+                  }}
                   spellCheck={false}
                 />
                 <p className="small muted">
@@ -1470,7 +1476,7 @@ export function App() {
                     setNotice("Encrypted backup downloaded.");
                   } else {
                     if (!backupFile) throw new Error("Choose a backup file");
-                    if (backupFile.size > 16_000_000)
+                    if (backupFile.size > MAX_BACKUP_LENGTH)
                       throw new Error("Backup is too large");
                     const restored = await decryptBackup(
                       await backupFile.text(),

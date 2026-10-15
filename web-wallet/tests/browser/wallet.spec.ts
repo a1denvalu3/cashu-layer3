@@ -112,6 +112,60 @@ async function fund(page: Page, value: number) {
   return hash;
 }
 
+test("discards a quote when the invoice changes during its request", async ({
+  page,
+}) => {
+  await page.goto("/wallet/");
+  await expect(page.getByText("Mint connected", { exact: true })).toBeVisible();
+  await fund(page, 100);
+  const invoices: string[] = [];
+  for (let i = 0; i < 2; i++) {
+    const response = await page.request.post(mintUrl + "/test/receiver", {
+      data: { amount: 10 },
+    });
+    invoices.push((await response.json()).request);
+  }
+  const [invoiceA, invoiceB] = invoices;
+  const quotes = new Map<string, string>();
+  let releaseQuote!: () => void;
+  const quoteGate = new Promise<void>((resolve) => {
+    releaseQuote = resolve;
+  });
+  await page.route(mintUrl + "/v1/melt/quote/bolt11", async (route) => {
+    const request = route.request().postDataJSON().request as string;
+    const response = await route.fetch();
+    quotes.set(request, (await response.json()).quote);
+    if (request === invoiceA) await quoteGate;
+    await route.fulfill({ response });
+  });
+
+  await page
+    .getByRole("button", { name: "Pay with Lightning", exact: true })
+    .click();
+  await page.getByLabel("Lightning invoice").fill(invoiceA);
+  await page.getByRole("button", { name: "Review payment" }).click();
+  await page.getByLabel("Lightning invoice").fill(invoiceB);
+  releaseQuote();
+  await expect(page.getByLabel("Lightning invoice")).toHaveValue(invoiceB);
+  await expect(
+    page.getByRole("button", { name: "Pay 10 sats", exact: true }),
+  ).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Review payment" }).click();
+  await expect(
+    page.getByRole("button", { name: "Pay 10 sats", exact: true }),
+  ).toBeVisible();
+  let paidQuote = "";
+  await page.route(mintUrl + "/v1/melt/bolt11", async (route) => {
+    paidQuote = route.request().postDataJSON().quote;
+    await route.continue();
+  });
+  await page.getByRole("button", { name: "Pay 10 sats", exact: true }).click();
+  await expect(page.getByText("Paid 10 sats · 2 sat fee.")).toBeVisible();
+  expect(paidQuote).toBe(quotes.get(invoiceB));
+  expect(paidQuote).not.toBe(quotes.get(invoiceA));
+});
+
 test("completes a pending payment without a manual retry or a second payment", async ({
   page,
 }) => {

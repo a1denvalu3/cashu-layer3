@@ -2,6 +2,8 @@ import { validateLayer3State } from "coco-cashu-indexeddb/layer3";
 import { normalizePSMintUrl } from "@cashu/cashu-ts/layer3";
 import type { Layer3State } from "coco-cashu-core/layer3";
 
+export const MAX_BACKUP_LENGTH = 16_000_000;
+
 const toBase64 = (bytes: Uint8Array) =>
   btoa(Array.from(bytes, (n) => String.fromCharCode(n)).join(""));
 function fromBase64(raw: string): Uint8Array<ArrayBuffer> {
@@ -42,6 +44,8 @@ export async function encryptBackup(
       state: validateLayer3State(state),
     }),
   );
+  if (contents.byteLength > MAX_BACKUP_LENGTH)
+    throw new Error("Wallet state is too large for a restorable backup");
   const ciphertext = await crypto.subtle.encrypt(
     {
       name: "AES-GCM",
@@ -51,7 +55,7 @@ export async function encryptBackup(
     await key(password, salt),
     contents,
   );
-  return JSON.stringify({
+  const backup = JSON.stringify({
     format: "cashu-layer3-encrypted",
     version: 1,
     kdf: "PBKDF2-SHA256",
@@ -60,12 +64,16 @@ export async function encryptBackup(
     iv: toBase64(iv),
     ciphertext: toBase64(new Uint8Array(ciphertext)),
   });
+  if (backup.length > MAX_BACKUP_LENGTH)
+    throw new Error("Wallet state is too large for a restorable backup");
+  return backup;
 }
 export async function decryptBackup(
   raw: string,
   password: string,
 ): Promise<{ mint: string; state: Layer3State }> {
-  if (raw.length > 16_000_000) throw new Error("Backup file is too large");
+  if (raw.length > MAX_BACKUP_LENGTH)
+    throw new Error("Backup file is too large");
   const envelope = JSON.parse(raw);
   if (
     envelope.format !== "cashu-layer3-encrypted" ||
