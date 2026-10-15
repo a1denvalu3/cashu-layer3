@@ -24,6 +24,7 @@
     "coco-cashu-core": "file:packages/coco",
     "coco-cashu-indexeddb": "file:packages/coco-indexeddb",
     "lucide-react": "0.468.0",
+    "qr-scanner": "1.4.2",
     "qrcode": "1.5.4",
     "react": "19.1.1",
     "react-dom": "19.1.1"

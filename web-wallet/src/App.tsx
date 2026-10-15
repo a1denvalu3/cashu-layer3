@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -47,6 +48,7 @@ import {
 import { decryptBackup, encryptBackup, MAX_BACKUP_LENGTH } from "./backup";
 import { useTheme } from "./theme";
 import { TmpCashMark } from "./TmpCashMark";
+import { InvoiceScanner } from "./InvoiceScanner";
 
 const repo = new TmpCashIndexedDbRepository();
 const defaultMint =
@@ -288,6 +290,12 @@ export function App() {
   const busyRef = useRef(false);
   const meltQuoteVersion = useRef(0);
   const fundingRef = useRef<TmpCashFunding | null>(null);
+  const updateInvoice = useCallback((value: string) => {
+    meltQuoteVersion.current += 1;
+    setInvoice(value);
+    setQuote(null);
+    setError("");
+  }, []);
   useEffect(() => {
     fundingRef.current = funding;
   }, [funding]);
@@ -1366,12 +1374,10 @@ export function App() {
                   required
                   placeholder="lnbc…"
                   value={invoice}
-                  onChange={(e) => {
-                    meltQuoteVersion.current += 1;
-                    setInvoice(e.target.value);
-                  }}
+                  onChange={(e) => updateInvoice(e.target.value)}
                   spellCheck={false}
                 />
+                <InvoiceScanner onScan={updateInvoice} disabled={busy} />
                 <p className="small muted">
                   The mint quotes the fee reserve. Any unused reserve comes back
                   as ecash while its backing remains active.
