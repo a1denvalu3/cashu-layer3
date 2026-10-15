@@ -5,8 +5,8 @@ The PS primitives were extracted from
 `bb70771695330389dca4ee86d75497f736394bf4`, under its MIT license.
 The original license is retained in `LICENSE.md`.
 
-`cashu/crypto/bls.py` retains the pyblst BLS12-381 point/scalar wrappers.
-`cashu/crypto/ps.py` retains key derivation, credential and pairing checks,
+`tmp_cash/crypto/bls.py` retains the pyblst BLS12-381 point/scalar wrappers.
+`tmp_cash/crypto/ps.py` retains key derivation, credential and pairing checks,
 owner-secret/nullifier proofs, randomized public/private presentations,
 multi-witness linear proofs, blind signing and client unblinding. Historical
 swap helper equations remain available as primitives, but the v3 API does not
@@ -47,7 +47,7 @@ user balances or continuing redemption rights.
 
 ## Spark backend
 
-`cashu/sparkl2.py` adapts the Python Breez initialization, payment preparation,
+`tmp_cash/sparkl2.py` adapts the Python Breez initialization, payment preparation,
 fee checks and payment-hash recovery in the existing `cashu-nft` integration,
 `cashu/lightning/sparkl2.py` (last file commit
 `a9749146c6bd7f9ab75375a050e9ba795cee301c`), under the retained MIT license.
@@ -62,5 +62,5 @@ optional `breez-sdk-spark` 0.17.2 Python package.
 ## Web wallet workspaces
 
 The browser wallet vendors compatible modified cashu-ts and Coco runtime source.
-Exact revisions, retained licenses, and cashu3 additions are listed in
+Exact revisions, retained licenses, and tmp.cash additions are listed in
 [web-wallet/PROVENANCE.md](web-wallet/PROVENANCE.md).

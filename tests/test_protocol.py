@@ -6,13 +6,13 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from conftest import PREIMAGE, SEED
 
-from cashu.client import ClientError, fresh_secret, output
-from cashu.crypto.bls import PublicKey
-from cashu.crypto.ps import G1, present_private, prove_linear
-from cashu.db import MintError
-from cashu.keyset import common_h_statements, denominations
-from cashu.mint import COMMON_H_DST, Mint
-from cashu.models import (
+from tmp_cash.client import ClientError, fresh_secret, output
+from tmp_cash.crypto.bls import PublicKey
+from tmp_cash.crypto.ps import G1, present_private, prove_linear
+from tmp_cash.db import MintError
+from tmp_cash.keyset import common_h_statements, denominations
+from tmp_cash.mint import COMMON_H_DST, Mint
+from tmp_cash.models import (
     BlindOutput,
     InvoiceState,
     SwapInput,
@@ -327,7 +327,7 @@ def test_definite_failed_pending_melt_releases_inputs_without_another_send(
 ):
     import asyncio
 
-    from cashu.lightning import Payment, PaymentState
+    from tmp_cash.lightning import Payment, PaymentState
 
     token, invoice = service.fund(64)
     operation = service.client.prepare_melt(token, invoice, fee_reserve=0)

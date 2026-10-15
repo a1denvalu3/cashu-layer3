@@ -12,9 +12,9 @@ from pydantic import BaseModel, Field
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from cashu.api import create_app
-from cashu.lightning import FakeBackend
-from cashu.mint import Mint
+from tmp_cash.api import create_app
+from tmp_cash.lightning import FakeBackend
+from tmp_cash.mint import Mint
 
 
 class Funding(BaseModel):
@@ -43,7 +43,7 @@ def main():
     parser.add_argument("--port", type=int, default=3339)
     parser.add_argument("--fee-limit-sat", type=int, default=2)
     args = parser.parse_args()
-    with tempfile.TemporaryDirectory(prefix="cashu-web-test-") as directory:
+    with tempfile.TemporaryDirectory(prefix="tmp-cash-web-test-") as directory:
         path = Path(directory)
         backend = FakeBackend(
             path / "fake.sqlite3",

@@ -22,11 +22,11 @@ from mnemonic import Mnemonic
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from cashu.api import create_app  # noqa: E402
-from cashu.client import Client, ClientError  # noqa: E402
-from cashu.mint import Mint  # noqa: E402
-from cashu.models import InvoiceState  # noqa: E402
-from cashu.sparkl2 import SparkBackend, SparkConnection  # noqa: E402
+from tmp_cash.api import create_app  # noqa: E402
+from tmp_cash.client import Client, ClientError  # noqa: E402
+from tmp_cash.mint import Mint  # noqa: E402
+from tmp_cash.models import InvoiceState  # noqa: E402
+from tmp_cash.sparkl2 import SparkBackend, SparkConnection  # noqa: E402
 
 REGTEST = Path(os.getenv("CASHU_REGTEST_DIR", str(Path.home() / "cashu-regtest")))
 PROJECT = os.getenv("CASHU_REGTEST_PROJECT", "cashu")
@@ -127,7 +127,7 @@ async def connection():
 
 async def main():
     spec = await connection()  # All preflight checks precede creating invoices.
-    with tempfile.TemporaryDirectory(prefix="cashu-spark-v3-") as directory:
+    with tempfile.TemporaryDirectory(prefix="tmp-cash-spark-v3-") as directory:
         path = Path(directory)
         backend = SparkBackend(
             path / "spark.sqlite3",

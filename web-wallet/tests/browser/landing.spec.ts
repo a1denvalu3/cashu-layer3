@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { psInvoiceDetails } from "@cashu/cashu-ts/layer3";
+import { psInvoiceDetails } from "@cashu/cashu-ts/tmp-cash";
 
 const mintUrl = "http://127.0.0.1:3339";
 
@@ -222,7 +222,7 @@ test("opens the wallet and keeps its funds and theme across visits to the explai
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(
     page.getByRole("region", {
-      name: "How cashu3 differs from ordinary ecash",
+      name: "How tmp.cash differs from ordinary ecash",
     }),
   ).toHaveCount(0);
   await page.getByRole("button", { name: "Add sats", exact: true }).click();
@@ -241,7 +241,7 @@ test("opens the wallet and keeps its funds and theme across visits to the explai
   ).toBeVisible();
   await page.getByRole("button", { name: "Back to wallet" }).click();
   await expect(page.getByTestId("balance")).toHaveText("100sats");
-  await page.getByRole("link", { name: "How cashu³ works" }).click();
+  await page.getByRole("link", { name: "How tmp.cash works" }).click();
   await expect(page).toHaveURL(/\/#how-it-works$/);
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await page
@@ -260,10 +260,10 @@ test("serves a direct wallet entry and distinct page metadata", async ({
   expect(landing.ok()).toBe(true);
   expect(wallet.ok()).toBe(true);
   expect(await landing.text()).toContain(
-    "<title>cashu3 — Ecash from a frozen deposit</title>",
+    "<title>tmp.cash — Ecash from a frozen deposit</title>",
   );
   expect(await wallet.text()).toContain(
-    "<title>cashu3 wallet — Cash with a deadline</title>",
+    "<title>tmp.cash wallet — Cash with a deadline</title>",
   );
   if (process.env.WALLET_E2E_PRODUCTION) {
     expect(await landing.text()).toContain("Content-Security-Policy");

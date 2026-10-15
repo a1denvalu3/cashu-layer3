@@ -12,13 +12,13 @@ import {
   decodePSToken,
   checkPSBacking,
   type PSToken,
-} from "@cashu/cashu-ts/layer3";
-import { Layer3Manager } from "coco-cashu-core/layer3";
-import { Layer3IndexedDbRepository } from "coco-cashu-indexeddb/layer3";
-import { denominationKeysetId } from "../packages/cashu-ts/src/layer3/crypto";
+} from "@cashu/cashu-ts/tmp-cash";
+import { TmpCashManager } from "coco-cashu-core/tmp-cash";
+import { TmpCashIndexedDbRepository } from "coco-cashu-indexeddb/tmp-cash";
+import { denominationKeysetId } from "../packages/cashu-ts/src/tmp-cash/crypto";
 
 let process: ChildProcess, mintUrl: string, wallet: PSWallet;
-const repos: Layer3IndexedDbRepository[] = [];
+const repos: TmpCashIndexedDbRepository[] = [];
 async function control(path: string, data: unknown) {
   const r = await fetch(mintUrl + "/test/" + path, {
     method: "POST",
@@ -37,7 +37,7 @@ async function mint(value: number): Promise<PSToken> {
   );
 }
 function repository() {
-  const repo = new Layer3IndexedDbRepository("test-" + psRandomHex());
+  const repo = new TmpCashIndexedDbRepository("test-" + psRandomHex());
   repos.push(repo);
   return repo;
 }
@@ -219,7 +219,7 @@ describe("Coco operation journal and IndexedDB", () => {
     try {
       const repo = repository(),
         quoteRequests: unknown[] = [],
-        manager = new Layer3Manager(repo, mintUrl, async (input, init) => {
+        manager = new TmpCashManager(repo, mintUrl, async (input, init) => {
           if (String(input).endsWith("/v1/melt/quote/bolt11"))
             quoteRequests.push(JSON.parse(String(init?.body)));
           return fetch(input, init);
@@ -252,7 +252,7 @@ describe("Coco operation journal and IndexedDB", () => {
     const repo = repository(),
       requests: string[] = [];
     let pending = true;
-    const manager = new Layer3Manager(repo, mintUrl, async (input, init) => {
+    const manager = new TmpCashManager(repo, mintUrl, async (input, init) => {
       const response = await fetch(input, init);
       if (String(input).endsWith("/v1/melt/bolt11")) {
         requests.push(String(init?.body));
@@ -289,7 +289,7 @@ describe("Coco operation journal and IndexedDB", () => {
   it("keeps a long-running melt reserved after bounded automatic checks", async () => {
     const repo = repository(),
       requests: string[] = [];
-    const manager = new Layer3Manager(repo, mintUrl, async (input, init) => {
+    const manager = new TmpCashManager(repo, mintUrl, async (input, init) => {
       if (String(input).endsWith("/v1/melt/bolt11")) {
         requests.push(String(init?.body));
         return new Response(
@@ -324,7 +324,7 @@ describe("Coco operation journal and IndexedDB", () => {
   it("does not automatically retry an unavailable response containing pending text", async () => {
     const repo = repository();
     let attempts = 0;
-    const manager = new Layer3Manager(repo, mintUrl, async (input, init) => {
+    const manager = new TmpCashManager(repo, mintUrl, async (input, init) => {
       if (String(input).endsWith("/v1/melt/bolt11")) {
         attempts++;
         return new Response(
@@ -359,7 +359,7 @@ describe("Coco operation journal and IndexedDB", () => {
       repo = repository();
     let dropped = false;
     const requests: string[] = [];
-    const manager = new Layer3Manager(repo, mintUrl, async (input, init) => {
+    const manager = new TmpCashManager(repo, mintUrl, async (input, init) => {
       const response = await fetch(input, init);
       if (String(input).endsWith("/v1/swap")) {
         requests.push(String(init?.body));
@@ -381,7 +381,7 @@ describe("Coco operation journal and IndexedDB", () => {
     await expect(manager.receive(encodePSToken(combined))).rejects.toThrow(
       "retry them under Pending operations",
     );
-    const restarted = new Layer3Manager(repo, mintUrl);
+    const restarted = new TmpCashManager(repo, mintUrl);
     await restarted.init();
     for (const op of saved.operations) await restarted.retry(op.id);
     expect((await restarted.view()).balance).toBe(96);
@@ -390,7 +390,7 @@ describe("Coco operation journal and IndexedDB", () => {
   it("recovers a saved issuance receipt even after the funding quote closes", async () => {
     const repo = repository();
     let dropped = false;
-    const manager = new Layer3Manager(repo, mintUrl, async (input, init) => {
+    const manager = new TmpCashManager(repo, mintUrl, async (input, init) => {
       const response = await fetch(input, init);
       if (String(input).endsWith("/v1/mint/bolt11") && !dropped) {
         dropped = true;
@@ -403,7 +403,7 @@ describe("Coco operation journal and IndexedDB", () => {
     await control("accept", { payment_hash: funding.id });
     await expect(manager.pollFunding(funding.id)).rejects.toThrow("Lost");
     await control("settle", { payment_hash: funding.id });
-    const restarted = new Layer3Manager(repo, mintUrl);
+    const restarted = new TmpCashManager(repo, mintUrl);
     await restarted.init();
     expect((await restarted.pollFunding(funding.id)).state).toBe("minted");
     expect((await repo.read()).operations).toEqual([]);
@@ -456,7 +456,7 @@ describe("Coco operation journal and IndexedDB", () => {
     let started!: () => void, resume!: () => void;
     const pending = new Promise<void>((resolve) => (started = resolve));
     const released = new Promise<void>((resolve) => (resume = resolve));
-    const manager = new Layer3Manager(repo, mintUrl, async (input, init) => {
+    const manager = new TmpCashManager(repo, mintUrl, async (input, init) => {
       if (slow && String(input).endsWith("/v1/htlcs/pending")) {
         snapshots++;
         if (snapshots === 1) {
@@ -487,7 +487,7 @@ describe("Coco operation journal and IndexedDB", () => {
     let mintStarted!: () => void, resumeMint!: () => void;
     const started = new Promise<void>((resolve) => (mintStarted = resolve));
     const resume = new Promise<void>((resolve) => (resumeMint = resolve));
-    const manager = new Layer3Manager(repo, mintUrl, async (input, init) => {
+    const manager = new TmpCashManager(repo, mintUrl, async (input, init) => {
       const url = String(input);
       if (url.endsWith("/v1/htlcs/pending")) snapshots++;
       const response = await fetch(input, init);
@@ -515,7 +515,7 @@ describe("Coco operation journal and IndexedDB", () => {
   });
   it("recovers falsely expired deposits only after live backing and unspent proof checks", async () => {
     const repo = repository(),
-      manager = new Layer3Manager(repo, mintUrl);
+      manager = new TmpCashManager(repo, mintUrl);
     await manager.init();
     const funding = await manager.createFunding(100);
     await control("accept", { payment_hash: funding.id });
@@ -523,7 +523,7 @@ describe("Coco operation journal and IndexedDB", () => {
     const original = (await repo.read()).proofs;
     for (const p of original)
       await repo.proofs.update(p.id, { state: "expired" });
-    const restarted = new Layer3Manager(repo, mintUrl);
+    const restarted = new TmpCashManager(repo, mintUrl);
     await restarted.init();
     expect((await restarted.view()).balance).toBe(100);
     expect((await restarted.view()).expired).toBe(0);
@@ -549,7 +549,7 @@ describe("Coco operation journal and IndexedDB", () => {
   });
   it("keeps outgoing tokens excluded when recovering live change and never restores closed backing", async () => {
     const repo = repository(),
-      manager = new Layer3Manager(repo, mintUrl);
+      manager = new TmpCashManager(repo, mintUrl);
     await manager.init();
     const funding = await manager.createFunding(100);
     await control("accept", { payment_hash: funding.id });
@@ -559,7 +559,7 @@ describe("Coco operation journal and IndexedDB", () => {
       ["ready", "sent"].includes(p.state),
     );
     for (const p of live) await repo.proofs.update(p.id, { state: "expired" });
-    const restarted = new Layer3Manager(repo, mintUrl);
+    const restarted = new TmpCashManager(repo, mintUrl);
     await restarted.init();
     expect((await restarted.view()).balance).toBe(90);
     expect((await restarted.view()).sent).toBe(10);
@@ -573,7 +573,7 @@ describe("Coco operation journal and IndexedDB", () => {
   it("keeps falsely expired tokens unavailable when spend checks fail or report pending", async () => {
     const repo = repository();
     let check: "normal" | "offline" | "pending" = "normal";
-    const manager = new Layer3Manager(repo, mintUrl, async (input, init) => {
+    const manager = new TmpCashManager(repo, mintUrl, async (input, init) => {
       if (String(input).endsWith("/v1/checkstate")) {
         if (check === "offline") return new Response("", { status: 503 });
         if (check === "pending")
@@ -609,13 +609,13 @@ describe("Coco operation journal and IndexedDB", () => {
   });
   it("preserves and expires old claims when their backing closes and the mint keys change", async () => {
     const repo = repository(),
-      manager = new Layer3Manager(repo, mintUrl);
+      manager = new TmpCashManager(repo, mintUrl);
     await manager.init();
     const funding = await manager.createFunding(32);
     await control("accept", { payment_hash: funding.id });
     await manager.pollFunding(funding.id);
     const saved = (await repo.read()).proofs[0];
-    const replacement = new Layer3Manager(
+    const replacement = new TmpCashManager(
       repo,
       mintUrl,
       async (input, init) => {
@@ -666,7 +666,7 @@ describe("Coco operation journal and IndexedDB", () => {
       }
       return fetch(input, init);
     };
-    const alice = new Layer3Manager(repo, mintUrl, fetcher);
+    const alice = new TmpCashManager(repo, mintUrl, fetcher);
     await alice.init();
     const funding = await alice.createFunding(100);
     await control("accept", { payment_hash: funding.id });
@@ -676,8 +676,8 @@ describe("Coco operation journal and IndexedDB", () => {
     const saved = (await repo.read()).operations[0];
     expect(saved.purpose).toBe("send");
     expect((await alice.view()).balance).toBe(36);
-    const reopened = new Layer3IndexedDbRepository(repo.name),
-      restart = new Layer3Manager(reopened, mintUrl, fetcher);
+    const reopened = new TmpCashIndexedDbRepository(repo.name),
+      restart = new TmpCashManager(reopened, mintUrl, fetcher);
     await restart.init();
     const result = await restart.retry(saved.id);
     expect(result.token && psTokenAmount(decodePSToken(result.token))).toBe(10);
@@ -685,7 +685,7 @@ describe("Coco operation journal and IndexedDB", () => {
     expect((await restart.view()).balance).toBe(90);
     expect((await reopened.read()).operations).toEqual([]);
     const bobRepo = repository(),
-      bob = new Layer3Manager(bobRepo, mintUrl);
+      bob = new TmpCashManager(bobRepo, mintUrl);
     await bob.init();
     expect(await bob.receive(result.token!)).toBe(10);
     expect((await bob.view()).balance).toBe(10);
@@ -747,7 +747,7 @@ describe("Coco operation journal and IndexedDB", () => {
       }
       return response;
     };
-    const manager = new Layer3Manager(repo, mintUrl, fetcher);
+    const manager = new TmpCashManager(repo, mintUrl, fetcher);
     await manager.init();
     await expect(manager.createFunding(64)).rejects.toThrow("Lost");
     const saved = (await repo.read()).fundings[0];
@@ -756,7 +756,7 @@ describe("Coco operation journal and IndexedDB", () => {
     await control("accept", { payment_hash: saved.id });
     await expect(manager.pollFunding(saved.id)).rejects.toThrow("Lost");
     expect((await repo.read()).operations).toHaveLength(1);
-    const restarted = new Layer3Manager(repo, mintUrl, fetcher);
+    const restarted = new TmpCashManager(repo, mintUrl, fetcher);
     await restarted.init();
     expect((await restarted.pollFunding(saved.id)).state).toBe("minted");
     expect((await restarted.view()).balance).toBe(64);
@@ -777,7 +777,7 @@ describe("Coco operation journal and IndexedDB", () => {
       }
       return response;
     };
-    const manager = new Layer3Manager(repo, mintUrl, fetcher);
+    const manager = new TmpCashManager(repo, mintUrl, fetcher);
     await manager.init();
     const funding = await manager.createFunding(100);
     await control("accept", { payment_hash: funding.id });
@@ -791,7 +791,7 @@ describe("Coco operation journal and IndexedDB", () => {
         (h) => h.payment_hash === funding.id,
       ),
     ).toBe(false);
-    const restarted = new Layer3Manager(repo, mintUrl, fetcher);
+    const restarted = new TmpCashManager(repo, mintUrl, fetcher);
     await restarted.init();
     const op = (await repo.read()).operations[0],
       result = await restarted.retry(op.id);
@@ -817,7 +817,7 @@ describe("Coco operation journal and IndexedDB", () => {
       }
       return fetch(input, init);
     };
-    const manager = new Layer3Manager(repo, mintUrl, fetcher);
+    const manager = new TmpCashManager(repo, mintUrl, fetcher);
     await manager.init();
     const funding = await manager.createFunding(100);
     await control("accept", { payment_hash: funding.id });
@@ -845,7 +845,7 @@ describe("Coco operation journal and IndexedDB", () => {
         );
       return fetch(input, init);
     };
-    const manager = new Layer3Manager(repo, mintUrl, fetcher);
+    const manager = new TmpCashManager(repo, mintUrl, fetcher);
     await manager.init();
     const funding = await manager.createFunding(100);
     await control("accept", { payment_hash: funding.id });
@@ -861,7 +861,7 @@ describe("Coco operation journal and IndexedDB", () => {
   });
   it("releases an expired melt quote after verifying its inputs remain unspent", async () => {
     const repo = repository(),
-      manager = new Layer3Manager(repo, mintUrl);
+      manager = new TmpCashManager(repo, mintUrl);
     await manager.init();
     const funding = await manager.createFunding(100);
     await control("accept", { payment_hash: funding.id });
@@ -880,7 +880,7 @@ describe("Coco operation journal and IndexedDB", () => {
   it("releases live inputs when another backing closes just before a combined melt", async () => {
     const repo = repository();
     let closedHash = "";
-    const manager = new Layer3Manager(repo, mintUrl, async (input, init) => {
+    const manager = new TmpCashManager(repo, mintUrl, async (input, init) => {
       if (closedHash && String(input).endsWith("/v1/melt/bolt11")) {
         await control("settle", { payment_hash: closedHash });
         closedHash = "";
@@ -918,7 +918,7 @@ describe("Coco operation journal and IndexedDB", () => {
         throw new TypeError("Proof check offline");
       return fetch(input, init);
     };
-    const manager = new Layer3Manager(repo, mintUrl, fetcher);
+    const manager = new TmpCashManager(repo, mintUrl, fetcher);
     await manager.init();
     const funding = await manager.createFunding(100);
     await control("accept", { payment_hash: funding.id });
@@ -931,7 +931,7 @@ describe("Coco operation journal and IndexedDB", () => {
   });
   it("keeps legacy acceptance errors reserved because their backing may become live again", async () => {
     const repo = repository();
-    const manager = new Layer3Manager(repo, mintUrl, async (input, init) => {
+    const manager = new TmpCashManager(repo, mintUrl, async (input, init) => {
       if (String(input).endsWith("/v1/melt/bolt11"))
         return new Response(
           JSON.stringify({
@@ -955,7 +955,7 @@ describe("Coco operation journal and IndexedDB", () => {
   });
   it("preserves a payout collision request that can become eligible after another quote fails", async () => {
     const repo = repository(),
-      manager = new Layer3Manager(repo, mintUrl);
+      manager = new TmpCashManager(repo, mintUrl);
     await manager.init();
     const funding = await manager.createFunding(100);
     await control("accept", { payment_hash: funding.id });
@@ -990,7 +990,7 @@ describe("Coco operation journal and IndexedDB", () => {
   });
   it("releases unspent inputs when another quote has already paid the invoice", async () => {
     const repo = repository(),
-      manager = new Layer3Manager(repo, mintUrl);
+      manager = new TmpCashManager(repo, mintUrl);
     await manager.init();
     const funding = await manager.createFunding(100);
     await control("accept", { payment_hash: funding.id });
@@ -1018,7 +1018,7 @@ describe("Coco operation journal and IndexedDB", () => {
       }
       return response;
     };
-    const manager = new Layer3Manager(repo, mintUrl, fetcher);
+    const manager = new TmpCashManager(repo, mintUrl, fetcher);
     await manager.init();
     const funding = await manager.createFunding(100);
     await control("accept", { payment_hash: funding.id });
@@ -1069,7 +1069,7 @@ describe("Coco operation journal and IndexedDB", () => {
         });
       return fetch(input, init);
     };
-    const manager = new Layer3Manager(repo, mintUrl, fetcher);
+    const manager = new TmpCashManager(repo, mintUrl, fetcher);
     await manager.init();
     const f = await manager.createFunding(32);
     await control("accept", { payment_hash: f.id });

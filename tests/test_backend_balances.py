@@ -6,10 +6,10 @@ import pytest
 from conftest import SEED
 from fastapi.testclient import TestClient
 
-from cashu.api import create_app
-from cashu.db import BackendError
-from cashu.lightning import FakeBackend, LndRestBackend
-from cashu.mint import Mint
+from tmp_cash.api import create_app
+from tmp_cash.db import BackendError
+from tmp_cash.lightning import FakeBackend, LndRestBackend
+from tmp_cash.mint import Mint
 
 
 @pytest.mark.asyncio
@@ -140,7 +140,7 @@ def test_balance_lookup_timeout_is_bounded_and_startup_continues(
             finally:
                 self.cancelled = True
 
-    monkeypatch.setattr("cashu.api.asyncio.wait_for", fast_wait_for)
+    monkeypatch.setattr("tmp_cash.api.asyncio.wait_for", fast_wait_for)
     backend = Backend(tmp_path / "fake.sqlite3")
     mint = Mint(tmp_path / "mint.sqlite3", SEED, backend)
     with caplog.at_level(logging.INFO, logger="uvicorn.error"):

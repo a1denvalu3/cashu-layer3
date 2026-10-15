@@ -5,10 +5,10 @@ import sys
 
 import pytest
 
-from cashu import cli
-from cashu.models import preimage_hash
-from cashu.token import decode_token, encode_token
-from cashu.wallet import Wallet
+from tmp_cash import cli
+from tmp_cash.models import preimage_hash
+from tmp_cash.token import decode_token, encode_token
+from tmp_cash.wallet import Wallet
 
 
 def run(monkeypatch, service, path, *arguments):
@@ -17,7 +17,14 @@ def run(monkeypatch, service, path, *arguments):
     monkeypatch.setattr(
         sys,
         "argv",
-        ["cashu", "--mint", service.client.mint_url, "--wallet", str(path), *arguments],
+        [
+            "tmp.cash",
+            "--mint",
+            service.client.mint_url,
+            "--wallet",
+            str(path),
+            *arguments,
+        ],
     )
     cli.main()
 
@@ -73,8 +80,8 @@ def test_invalid_send_reports_actionable_error(service, monkeypatch, capsys):
 def test_receive_journals_all_backings_before_first_remote_spend(
     service, monkeypatch, capsys
 ):
-    from cashu.client import ClientError
-    from cashu.models import Token
+    from tmp_cash.client import ClientError
+    from tmp_cash.models import Token
 
     first, _ = service.fund(32, os.urandom(32))
     second, _ = service.fund(64, os.urandom(32))

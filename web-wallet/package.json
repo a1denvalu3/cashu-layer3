@@ -1,5 +1,5 @@
 {
-  "name": "cashu3-web-wallet",
+  "name": "tmp-cash-web-wallet",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -14,8 +14,8 @@
     "test:e2e": "playwright test",
     "preview": "vite preview --host 127.0.0.1",
     "test:e2e:production": "npm run build && WALLET_E2E_PRODUCTION=1 playwright test",
-    "format": "prettier --write src \"tests/**/*.ts\" packages/cashu-ts/src/layer3 packages/coco/layer3 packages/coco-indexeddb/src/layer3 *.ts *.json *.md",
-    "format:check": "prettier --check src \"tests/**/*.ts\" packages/cashu-ts/src/layer3 packages/coco/layer3 packages/coco-indexeddb/src/layer3 *.ts *.json *.md"
+    "format": "prettier --write src \"tests/**/*.ts\" packages/cashu-ts/src/tmp-cash packages/coco/tmp-cash packages/coco-indexeddb/src/tmp-cash *.ts *.json *.md",
+    "format:check": "prettier --check src \"tests/**/*.ts\" packages/cashu-ts/src/tmp-cash packages/coco/tmp-cash packages/coco-indexeddb/src/tmp-cash *.ts *.json *.md"
   },
   "dependencies": {
     "@cashu/cashu-ts": "file:packages/cashu-ts",

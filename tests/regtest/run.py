@@ -15,12 +15,12 @@ from pathlib import Path
 import httpx
 from fastapi.testclient import TestClient
 
-from cashu.api import create_app
-from cashu.client import Client, ClientError
-from cashu.db import BackendError
-from cashu.lightning import LndRestBackend, invoice_details
-from cashu.mint import Mint
-from cashu.models import InvoiceState, htlc_claim_scalar
+from tmp_cash.api import create_app
+from tmp_cash.client import Client, ClientError
+from tmp_cash.db import BackendError
+from tmp_cash.lightning import LndRestBackend, invoice_details
+from tmp_cash.mint import Mint
+from tmp_cash.models import InvoiceState, htlc_claim_scalar
 
 AMOUNT = 12345
 SETUP_HINT = (
@@ -163,7 +163,7 @@ def exercise(
     identity: str,
     hold_expiry_delta: int = 18,
 ) -> None:
-    with tempfile.TemporaryDirectory(prefix="cashu-lnd-") as directory:
+    with tempfile.TemporaryDirectory(prefix="tmp-cash-lnd-") as directory:
         path = Path(directory)
         mint_node.copy("/root/.lnd/tls.cert", path / "tls.cert")
         mint_node.copy(

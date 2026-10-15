@@ -1,7 +1,7 @@
 [project]
-name = "cashu3"
+name = "tmp.cash"
 version = "0.2.0"
-description = "cashu3 (cashu cubed): denominated PS tokens backed by expiring Lightning holds"
+description = "tmp.cash: denominated PS tokens backed by expiring Lightning holds"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -19,12 +19,12 @@ dependencies = [
 spark = ["breez-sdk-spark==0.17.2"]
 
 [project.scripts]
-mint = "cashu.server:main"
-cashu = "cashu.cli:main"
-cashu3 = "cashu.cli:main"
+mint = "tmp_cash.server:main"
+"tmp.cash" = "tmp_cash.cli:main"
+"tmp.cash-mint" = "tmp_cash.server:main"
 
 [tool.poetry]
-packages = [{ include = "cashu" }]
+packages = [{ include = "tmp_cash" }]
 include = ["PROVENANCE.md", "examples", "tests", "Makefile", "poetry.lock", ".env.example"]
 
 [tool.poetry.group.dev.dependencies]

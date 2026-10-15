@@ -4,24 +4,24 @@ import type {
   PSQuote,
   PSReceipt,
   PSSnapshot,
-} from "@cashu/cashu-ts/layer3";
+} from "@cashu/cashu-ts/tmp-cash";
 
-export type Layer3ProofState =
+export type TmpCashProofState =
   | "ready"
   | "pending"
   | "reserved"
   | "sent"
   | "spent"
   | "expired";
-export interface Layer3ProofRecord {
+export interface TmpCashProofRecord {
   id: string;
   mint: string;
   proof: PSProof;
-  state: Layer3ProofState;
+  state: TmpCashProofState;
   operationId: string | null;
   createdAt: number;
 }
-export interface Layer3Funding {
+export interface TmpCashFunding {
   id: string;
   mint: string;
   amount: number;
@@ -31,7 +31,7 @@ export interface Layer3Funding {
   state: "waiting" | "minted" | "closed";
   createdAt: number;
 }
-export interface Layer3Operation {
+export interface TmpCashOperation {
   id: string;
   mint: string;
   payload: PSOperation;
@@ -41,54 +41,54 @@ export interface Layer3Operation {
   createdAt: number;
   error: string | null;
 }
-export interface Layer3Activity {
+export interface TmpCashActivity {
   id: string;
   mint: string;
-  purpose: Layer3Operation["purpose"];
+  purpose: TmpCashOperation["purpose"];
   amount: number;
   createdAt: number;
   state: "complete" | "sent";
   token: string | null;
   receipt: PSReceipt | null;
 }
-export interface Layer3State {
-  proofs: Layer3ProofRecord[];
-  operations: Layer3Operation[];
-  fundings: Layer3Funding[];
-  activity: Layer3Activity[];
+export interface TmpCashState {
+  proofs: TmpCashProofRecord[];
+  operations: TmpCashOperation[];
+  fundings: TmpCashFunding[];
+  activity: TmpCashActivity[];
 }
-export interface Layer3Repository {
-  read(): Promise<Layer3State>;
-  saveFunding(funding: Layer3Funding): Promise<void>;
-  updateFunding(funding: Layer3Funding): Promise<void>;
+export interface TmpCashRepository {
+  read(): Promise<TmpCashState>;
+  saveFunding(funding: TmpCashFunding): Promise<void>;
+  updateFunding(funding: TmpCashFunding): Promise<void>;
   reserve(
-    operation: Layer3Operation,
-    inputs: Layer3ProofRecord[],
+    operation: TmpCashOperation,
+    inputs: TmpCashProofRecord[],
   ): Promise<void>;
   reserveMany(
     entries: {
-      operation: Layer3Operation;
-      inputs: Layer3ProofRecord[];
+      operation: TmpCashOperation;
+      inputs: TmpCashProofRecord[];
     }[],
   ): Promise<void>;
   complete(
-    operation: Layer3Operation,
-    proofs: Layer3ProofRecord[],
-    activity: Layer3Activity,
+    operation: TmpCashOperation,
+    proofs: TmpCashProofRecord[],
+    activity: TmpCashActivity,
   ): Promise<void>;
-  release(operation: Layer3Operation): Promise<void>;
+  release(operation: TmpCashOperation): Promise<void>;
   setError(id: string, message: string): Promise<void>;
   updateProofStates(
-    changes: { id: string; state: Layer3ProofState }[],
+    changes: { id: string; state: TmpCashProofState }[],
   ): Promise<void>;
   attachPreimage(
     mint: string,
     paymentHash: string,
     preimage: string,
   ): Promise<void>;
-  importState(state: Layer3State): Promise<void>;
+  importState(state: TmpCashState): Promise<void>;
 }
-export interface Layer3View extends Layer3State {
+export interface TmpCashView extends TmpCashState {
   mint: string;
   balance: number;
   redeemable: number;

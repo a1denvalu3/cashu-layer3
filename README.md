@@ -1,4 +1,4 @@
-# cashu3 — cashu cubed
+# tmp.cash
 
 An experimental Python mint and wallet for **denominated tokens backed by held
 Lightning payments**. Credentials use Pointcheval–Sanders (PS) signatures on
@@ -10,7 +10,7 @@ several HTLCs, including user-funded routing fees and returned change.
 the claim. Holders must redeem before the published redemption cutoff. There
 are no user balances or continuing redemption rights after settlement.
 
-The [offline protocol guide](docs/layer3.html) illustrates the v3 flow.
+The [offline protocol guide](docs/protocol.html) illustrates the v3 flow.
 
 The [web wallet](web-wallet/README.md) uses local modified Coco and cashu-ts
 workspaces for this protocol. Run `cd web-wallet && npm ci && npm run dev` and
@@ -60,7 +60,7 @@ experimental protocol, not a cryptographic guarantee against a dishonest mint.
 
 ## Run the demo
 
-`poetry run mint` logs the selected backend's balances during startup. Spark
+`poetry run tmp.cash-mint` logs the selected backend's balances during startup. Spark
 reports its SDK wallet balance; LND reports local and remote channel balances,
 unsettled channel funds, and confirmed and unconfirmed on-chain funds separately.
 Held backing payments are distinct from these operator balances. The fake
@@ -74,9 +74,22 @@ poetry install
 make demo
 ```
 
-The project is **cashu3**, pronounced **cashu cubed** and displayed as **cashu³**
-in the wallet. The installed wallet command is `cashu3`; `cashu` remains an alias
-for existing setups.
+The project is **tmp.cash**. The installed commands are `tmp.cash` for the
+wallet and `tmp.cash-mint` for the server; `mint` remains a short server alias.
+Python integrations import `tmp_cash`. The browser workspaces expose this
+protocol through their `tmp-cash` subpaths and `TmpCash` types.
+
+Mint configuration uses `TMP_CASH_*` variables. Existing `CASHU_*` settings
+remain accepted for upgrades. Environment variables override `.env`; within
+each source, the new names take precedence. Keep the existing data directory
+and mint seed when upgrading an existing v3 installation.
+
+The rebrand preserves v3 token encodings, cryptographic domains, browser storage
+identifiers, and encrypted backup formats so existing funds and backups remain
+readable. Vendored Cashu/Coco package names, upstream attribution, and external
+`cashu-regtest` fixture names retain their original names. When moving the web
+wallet to a different origin, export an encrypted backup from the old origin and
+restore it in the new one; browser storage does not transfer between origins.
 
 The persistent fake backend runs in a temporary directory. The demo mints
 1,000 sats, sends exactly 10 through a private split, pays 9 sats, returns unused
@@ -86,14 +99,14 @@ node or server is needed.
 ## Run a mint
 
 ```bash
-poetry run mint --backend fake --data data/mint-v3
+poetry run tmp.cash-mint --backend fake --data data/mint-v3
 ```
 
 For LND, copy `.env.example` to `.env`, configure the node's REST endpoint,
 TLS certificate and macaroon, and choose a **new v3 mint directory**:
 
 ```bash
-poetry run mint --backend lnd --data data/lnd-v3 \
+poetry run tmp.cash-mint --backend lnd --data data/lnd-v3 \
   --lnd-endpoint https://127.0.0.1:8081 \
   --lnd-cert /path/to/tls.cert \
   --lnd-macaroon /path/to/admin.macaroon \
@@ -110,7 +123,7 @@ needs outgoing liquidity for payments while its incoming holds remain pending.
 
 New LND funding invoices request a redeemable lifetime of **2,016 blocks** by
 default, approximately two weeks at Bitcoin's average block interval. Configure
-it with `CASHU_LND_TOKEN_LIFETIME_BLOCKS` in `.env` or
+it with `TMP_CASH_LND_TOKEN_LIFETIME_BLOCKS` in `.env` or
 `--lnd-token-lifetime-blocks`. The mint adds the node cancellation delta and its
 settlement margin to the invoice's final-hop CLTV delta: defaults request
 2,040 blocks. The invoice's payment window remains separate (one hour by
@@ -167,20 +180,20 @@ After adding it, run `docker compose -p cashu restart lnd-1` and wait for
 The mint's `.env` should contain:
 
 ```dotenv
-CASHU_MINT_BACKEND=lnd
-CASHU_MINT_DATA=data/lnd-v3
-CASHU_LND_ENDPOINT=https://localhost:8081
-CASHU_LND_CERT=data/lnd-manual/tls.cert
-CASHU_LND_MACAROON=data/lnd-manual/admin.macaroon
-CASHU_LND_HOLD_EXPIRY_DELTA=18
-CASHU_LND_TOKEN_LIFETIME_BLOCKS=2016
+TMP_CASH_MINT_BACKEND=lnd
+TMP_CASH_MINT_DATA=data/lnd-v3
+TMP_CASH_LND_ENDPOINT=https://localhost:8081
+TMP_CASH_LND_CERT=data/lnd-manual/tls.cert
+TMP_CASH_LND_MACAROON=data/lnd-manual/admin.macaroon
+TMP_CASH_LND_HOLD_EXPIRY_DELTA=18
+TMP_CASH_LND_TOKEN_LIFETIME_BLOCKS=2016
 ```
 
 The local setup already has those credential files. If they are missing or
 the regtest node has been recreated, copy them from the current mint node:
 
 ```bash
-cd ~/cashu-layer3
+cd ~/tmp.cash
 mkdir -p data/lnd-manual
 docker cp cashu-lnd-3-1:/root/.lnd/tls.cert data/lnd-manual/tls.cert
 docker cp cashu-lnd-3-1:/root/.lnd/data/chain/bitcoin/regtest/admin.macaroon data/lnd-manual/admin.macaroon
@@ -191,7 +204,7 @@ A fixture reset can replace LND's TLS certificate, macaroon and node identity.
 Stale credentials make `/v1/htlcs/pending` return 503 even while `/v1/keys`
 returns 200. After a reset, refresh the credentials and restart the mint. If the
 node identity changed, its old invoices are gone: retain the old mint directory
-and seed, then set `CASHU_MINT_DATA` to a fresh directory for the new node.
+and seed, then set `TMP_CASH_MINT_DATA` to a fresh directory for the new node.
 Old tokens lose their backing. Reload the wallet so it loads the new keyset;
 closed claims remain in its history as expired. Reapply the payer's
 `max-cltv-expiry=4096` setting if its node configuration was also reset.
@@ -199,12 +212,12 @@ closed claims remain in its history as expired. Reapply the payer's
 Start the mint and wallet in separate terminals:
 
 ```bash
-cd ~/cashu-layer3
-poetry run mint
+cd ~/tmp.cash
+poetry run tmp.cash-mint
 ```
 
 ```bash
-cd ~/cashu-layer3/web-wallet
+cd ~/tmp.cash/web-wallet
 npm run dev
 ```
 
@@ -234,7 +247,7 @@ For an automated check using temporary mint databases and this network's direct
 mint-to-receiver route, run:
 
 ```bash
-cd ~/cashu-layer3
+cd ~/tmp.cash
 poetry run python tests/regtest/run.py \
   --payer-container cashu-lnd-2-1 \
   --receiver-container cashu-lnd-1-1
@@ -249,13 +262,13 @@ Install the optional SDK and select a dedicated mint wallet and data directory:
 
 ```bash
 poetry install -E spark
-poetry run mint --backend spark --data data/spark-v3 \
+poetry run tmp.cash-mint --backend spark --data data/spark-v3 \
   --spark-mnemonic-file /path/to/mint-spark.mnemonic \
   --spark-network mainnet --fee-limit-sat 10 --settle-margin-seconds 120
 ```
 
 The mnemonic file contains the Spark wallet's seed phrase. Alternatively, set
-`CASHU_SPARK_MNEMONIC` in the environment or `.env`. Set `CASHU_SPARK_API_KEY`
+`TMP_CASH_SPARK_MNEMONIC` in the environment or `.env`. Set `TMP_CASH_SPARK_API_KEY`
 to your Breez API key. Retain the wallet mnemonic, mint seed, `spark.sqlite3`
 and `spark-sdk/` storage together across restarts. Run one mint process for this
 wallet and do not share its SDK storage with another application. The mint's
@@ -329,10 +342,10 @@ fixture.
 
 ### Fund the mint's backend wallet
 
-Set `CASHU_ADMIN_TOKEN` in the mint's environment or `.env` and restart the mint.
+Set `TMP_CASH_ADMIN_TOKEN` in the mint's environment or `.env` and restart the mint.
 Generate a dedicated operator token with `openssl rand -hex 32`. For the VPS
-systemd setup, add it to `/etc/cashu3/mint.env` and run
-`sudo systemctl restart cashu3-mint`.
+systemd setup, add it to `/etc/tmp.cash/mint.env` and run
+`sudo systemctl restart tmp.cash-mint`.
 
 The operator-only `POST /v1/admin/fund` endpoint creates an **ordinary Lightning
 invoice** for the requested sats amount using whichever backend the mint is
@@ -346,9 +359,9 @@ a simulated, payable invoice for testing. Every backend implements the same
 Export the same operator token in the shell making the request:
 
 ```bash
-export CASHU_ADMIN_TOKEN='your-generated-operator-token'
+export TMP_CASH_ADMIN_TOKEN='your-generated-operator-token'
 curl --fail-with-body -sS https://mint.example.com/v1/admin/fund \
-  -H "Authorization: Bearer $CASHU_ADMIN_TOKEN" \
+  -H "Authorization: Bearer $TMP_CASH_ADMIN_TOKEN" \
   -H 'Content-Type: application/json' \
   --data '{"amount":100000,"expiry":3600}'
 ```
@@ -363,7 +376,7 @@ request is optional and defaults to 3,600 seconds; its allowed range is
 limit.
 
 The route is excluded from OpenAPI/Swagger and the wallet UI. It returns 404
-when `CASHU_ADMIN_TOKEN` is unset and requires a bearer token when enabled.
+when `TMP_CASH_ADMIN_TOKEN` is unset and requires a bearer token when enabled.
 Use HTTPS for remote requests; on the VPS itself,
 `http://127.0.0.1:3338/v1/admin/fund` also works. Keep the
 operator token out of URLs and frontend configuration.
@@ -374,7 +387,7 @@ The default mint is `http://127.0.0.1:3338` and the default wallet database is
 `data/wallet-v3.sqlite3`. Select another mint or wallet using global flags:
 
 ```bash
-poetry run cashu --mint http://127.0.0.1:3338 --wallet data/alice-v3.sqlite3 \
+poetry run tmp.cash --mint http://127.0.0.1:3338 --wallet data/alice-v3.sqlite3 \
   mint 1000 <payment_hash> --preimage <32-byte-lowercase-hex>
 ```
 
@@ -384,21 +397,21 @@ The preimage is stored locally and carried with token proofs.
 
 ```bash
 # Split automatically, retaining local change. Send chooses one backing HTLC.
-poetry run cashu --wallet data/alice-v3.sqlite3 send 10
+poetry run tmp.cash --wallet data/alice-v3.sqlite3 send 10
 # If several HTLCs can fund the send, choose --payment-hash <hash>.
 
 # Receiver downloads the full backing list, then refreshes ownership privately.
-poetry run cashu --wallet data/bob-v3.sqlite3 receive <cashuPS-token>
+poetry run tmp.cash --wallet data/bob-v3.sqlite3 receive <cashuPS-token>
 
 # Can combine different HTLCs. Covers invoice + reserve and returns fee change.
-poetry run cashu --wallet data/bob-v3.sqlite3 pay <bolt11> --fee-reserve 1
+poetry run tmp.cash --wallet data/bob-v3.sqlite3 pay <bolt11> --fee-reserve 1
 
-poetry run cashu htlcs
-poetry run cashu list
-poetry run cashu balance --refresh --verbose
-poetry run cashu pending
-poetry run cashu retry <operation_id>
-poetry run cashu abandon <operation_id>
+poetry run tmp.cash htlcs
+poetry run tmp.cash list
+poetry run tmp.cash balance --refresh --verbose
+poetry run tmp.cash pending
+poetry run tmp.cash retry <operation_id>
+poetry run tmp.cash abandon <operation_id>
 ```
 
 `melt` aliases `pay`. Repeating `--token-id` selects specific inputs for a melt,
@@ -520,9 +533,9 @@ There is no automatic conversion of old whole-claim balances into v3. Preserve
 old databases and complete their claims using the previous version; use fresh
 mint and wallet directories for this protocol.
 
-If `poetry run mint` reports a previous protocol, check `CASHU_MINT_DATA` in
+If `poetry run tmp.cash-mint` reports a previous protocol, check `TMP_CASH_MINT_DATA` in
 your existing `.env`: it overrides the default v3 directory. For an old LND
-setup using `data/lnd-manual`, set `CASHU_MINT_DATA=data/lnd-v3` and restart.
+setup using `data/lnd-manual`, set `TMP_CASH_MINT_DATA=data/lnd-v3` and restart.
 Keep the old directory, including its database and seed.
 
 ## Verification

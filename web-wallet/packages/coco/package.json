@@ -6,7 +6,7 @@
   "license": "MIT",
   "exports": {
     ".": "./index.ts",
-    "./layer3": "./layer3/index.ts"
+    "./tmp-cash": "./tmp-cash/index.ts"
   },
   "dependencies": {
     "@cashu/cashu-ts": "file:../cashu-ts",
@@ -14,5 +14,5 @@
     "@noble/hashes": "2.0.1",
     "@scure/bip32": "2.0.1"
   },
-  "layer3Fork": true
+  "tmpCashFork": true
 }

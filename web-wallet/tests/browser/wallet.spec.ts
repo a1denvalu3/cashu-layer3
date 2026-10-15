@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { psInvoiceDetails } from "@cashu/cashu-ts/layer3";
+import { psInvoiceDetails } from "@cashu/cashu-ts/tmp-cash";
 import { readFile } from "node:fs/promises";
 
 const mintUrl = "http://127.0.0.1:3339";
@@ -326,10 +326,8 @@ test("shows the mint's two-week policy as a read-only setting", async ({
     });
   });
   await page.goto("/wallet/");
-  await expect(page).toHaveTitle("cashu3 wallet — Cash with a deadline");
-  await expect(
-    page.getByRole("link", { name: "cashu3 (cashu cubed) home" }),
-  ).toBeVisible();
+  await expect(page).toHaveTitle("tmp.cash wallet — Cash with a deadline");
+  await expect(page.getByRole("link", { name: "tmp.cash home" })).toBeVisible();
   await expect(page.getByText("Mint connected", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(

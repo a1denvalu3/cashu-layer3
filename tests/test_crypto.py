@@ -2,8 +2,8 @@ from dataclasses import replace
 
 import pytest
 
-from cashu.crypto.bls import PublicKey, curve_order
-from cashu.crypto.ps import (
+from tmp_cash.crypto.bls import PublicKey, curve_order
+from tmp_cash.crypto.ps import (
     G1,
     Credential,
     MintPrivateKeyPS,

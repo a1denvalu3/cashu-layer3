@@ -1,4 +1,4 @@
-# cashu3 web wallet
+# tmp.cash web wallet
 
 A responsive browser wallet for the PS/BLS12-381 mint in this repository. Modified
 cashu-ts handles credentials and wire requests; modified Coco manages proofs,
@@ -11,7 +11,7 @@ and Spark backends through the same HTTP API.
 Start your configured mint from the repository root, for example:
 
 ```sh
-poetry run mint --backend lnd --data data/lnd-v3
+poetry run tmp.cash-mint --backend lnd --data data/lnd-v3
 ```
 
 Use the [root README's Spark configuration](../README.md#spark-with-the-breez-python-sdk) for a
@@ -46,7 +46,7 @@ over HTTPS and use an HTTPS mint; browsers block mixed-content requests.
   Expiry is explained above the diagram. Further questions cover redemption and
   mint trust. It opens without connecting to a mint or initializing wallet
   storage. **Open wallet** takes you to the
-  wallet; **How cashu³ works** in the wallet footer returns to the explainer.
+  wallet; **How tmp.cash works** in the wallet footer returns to the explainer.
 - **Add sats:** generates and durably saves a backing preimage, requests a HODL
   invoice with its hash, and displays the invoice/QR. Pay from a Lightning wallet.
   Once the payment is held (`ACCEPTED`), the wallet mints denomination proofs.

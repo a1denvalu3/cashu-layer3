@@ -1,4 +1,4 @@
-/** Coco's durable prepare/reserve/execute/finalize lifecycle for Layer3 credentials. */
+/** Coco's durable prepare/reserve/execute/finalize lifecycle for TmpCash credentials. */
 import {
   PSWallet,
   PSMintError,
@@ -18,18 +18,18 @@ import {
   type PSMeltOperation,
   type PSReceipt,
   type PSSnapshot,
-} from "@cashu/cashu-ts/layer3";
+} from "@cashu/cashu-ts/tmp-cash";
 import { EventBus } from "../events/EventBus";
 import type {
-  Layer3Repository,
-  Layer3View,
-  Layer3Funding,
-  Layer3Operation,
-  Layer3ProofRecord,
-  Layer3Activity,
+  TmpCashRepository,
+  TmpCashView,
+  TmpCashFunding,
+  TmpCashOperation,
+  TmpCashProofRecord,
+  TmpCashActivity,
 } from "./types";
 
-export class Layer3Manager {
+export class TmpCashManager {
   readonly events = new EventBus<{ change: undefined }>();
   readonly wallet: PSWallet;
   private snapshot: PSSnapshot | null = null;
@@ -38,7 +38,7 @@ export class Layer3Manager {
   private queue: Promise<unknown> = Promise.resolve();
   private refreshTask: Promise<void> | null = null;
   constructor(
-    readonly repo: Layer3Repository,
+    readonly repo: TmpCashRepository,
     mintUrl: string,
     fetcher?: typeof fetch,
   ) {
@@ -51,7 +51,8 @@ export class Layer3Manager {
   private exclusive<T>(fn: () => Promise<T>): Promise<T> {
     const run = async (): Promise<T> =>
       typeof navigator !== "undefined" && navigator.locks
-        ? await navigator.locks.request("cashu-layer3-wallet", fn)
+        ? // Coordinate writes with tabs opened before the tmp.cash rebrand too.
+          await navigator.locks.request("cashu-layer3-wallet", fn)
         : await fn();
     const task = this.queue.then(run, run);
     this.queue = task.catch(() => undefined);
@@ -60,10 +61,10 @@ export class Layer3Manager {
   private async changed(): Promise<void> {
     await this.events.emit("change", undefined);
   }
-  async view(): Promise<Layer3View> {
+  async view(): Promise<TmpCashView> {
     const state = await this.repo.read();
     const local = state.proofs.filter((p) => p.mint === this.wallet.mintUrl);
-    const sum = (kind: Layer3ProofRecord["state"]) =>
+    const sum = (kind: TmpCashProofRecord["state"]) =>
       local
         .filter((p) => p.state === kind)
         .reduce((n, p) => n + p.proof.amount, 0);
@@ -110,7 +111,7 @@ export class Layer3Manager {
       // as issuance and spending. An older snapshot must not expire new outputs.
       const state = await this.repo.read();
       this.snapshot = await this.wallet.pendingHTLCs();
-      const changes: { id: string; state: Layer3ProofRecord["state"] }[] = [];
+      const changes: { id: string; state: TmpCashProofRecord["state"] }[] = [];
       const candidates = state.proofs.filter(
         (p) =>
           p.mint === this.wallet.mintUrl &&
@@ -176,8 +177,8 @@ export class Layer3Manager {
   }
   private record(
     proof: PSProof,
-    state: Layer3ProofRecord["state"] = "ready",
-  ): Layer3ProofRecord {
+    state: TmpCashProofRecord["state"] = "ready",
+  ): TmpCashProofRecord {
     return {
       id: psNullifier(proof),
       mint: this.wallet.mintUrl,
@@ -187,7 +188,7 @@ export class Layer3Manager {
       createdAt: Date.now(),
     };
   }
-  private async save(operation: Layer3Operation): Promise<void> {
+  private async save(operation: TmpCashOperation): Promise<void> {
     const inputs =
       operation.payload.kind === "mint"
         ? []
@@ -196,11 +197,11 @@ export class Layer3Manager {
     await this.changed();
   }
   private operation(
-    payload: Layer3Operation["payload"],
-    purpose: Layer3Operation["purpose"],
+    payload: TmpCashOperation["payload"],
+    purpose: TmpCashOperation["purpose"],
     amount: number,
     sendCount = 0,
-  ): Layer3Operation {
+  ): TmpCashOperation {
     return {
       id: payload.id,
       mint: this.wallet.mintUrl,
@@ -215,11 +216,11 @@ export class Layer3Manager {
   async createFunding(
     value: number,
     invoiceExpiry = 3600,
-  ): Promise<Layer3Funding> {
+  ): Promise<TmpCashFunding> {
     return this.exclusive(async () => {
       amountSchema.parse(value);
       const preimage = psRandomHex(),
-        funding: Layer3Funding = {
+        funding: TmpCashFunding = {
           id: psPreimageHash(preimage),
           mint: this.wallet.mintUrl,
           amount: value,
@@ -242,7 +243,7 @@ export class Layer3Manager {
       return funding;
     });
   }
-  async pollFunding(id: string): Promise<Layer3Funding> {
+  async pollFunding(id: string): Promise<TmpCashFunding> {
     return this.exclusive(async () => {
       const state = await this.repo.read(),
         funding = state.fundings.find(
@@ -296,7 +297,7 @@ export class Layer3Manager {
       amountSchema.parse(value);
       await this.refreshUnlocked();
       const { proofs } = await this.repo.read(),
-        groups = new Map<string, Layer3ProofRecord[]>();
+        groups = new Map<string, TmpCashProofRecord[]>();
       for (const p of proofs)
         if (
           p.mint === this.wallet.mintUrl &&
@@ -364,7 +365,7 @@ export class Layer3Manager {
         if (states.some((s) => s !== "UNSPENT"))
           throw new Error("Token is already spent or has a pending operation");
       }
-      const operations: Layer3Operation[] = [];
+      const operations: TmpCashOperation[] = [];
       for (const proofs of groups.values()) {
         const source = this.token(proofs),
           op = this.operation(
@@ -452,7 +453,7 @@ export class Layer3Manager {
       return (await this.execute(op)).receipt!;
     });
   }
-  async retry(id: string): Promise<Layer3Activity> {
+  async retry(id: string): Promise<TmpCashActivity> {
     return this.exclusive(async () => {
       const op = (await this.repo.read()).operations.find(
         (o) => o.id === id && o.mint === this.wallet.mintUrl,
@@ -478,9 +479,9 @@ export class Layer3Manager {
       }
     }
   }
-  private async execute(op: Layer3Operation): Promise<Layer3Activity> {
+  private async execute(op: TmpCashOperation): Promise<TmpCashActivity> {
     try {
-      const activity: Layer3Activity = {
+      const activity: TmpCashActivity = {
         id: op.id,
         mint: op.mint,
         purpose: op.purpose,
@@ -490,7 +491,7 @@ export class Layer3Manager {
         token: null,
         receipt: null,
       };
-      let proofs: Layer3ProofRecord[];
+      let proofs: TmpCashProofRecord[];
       if (op.payload.kind === "mint") {
         const token = await this.wallet.finishMint(op.payload);
         proofs = token.proofs.map((p) => this.record(p));

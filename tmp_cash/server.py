@@ -30,85 +30,97 @@ def load_seed(path: Path) -> bytes:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    configuration = {**dotenv_values(Path.cwd() / ".env"), **os.environ}
+    configuration: dict[str, str | None] = {}
+    for source in (dotenv_values(Path.cwd() / ".env"), os.environ):
+        # Preserve existing deployments; environment still takes priority over
+        # .env, and the new prefix wins over its legacy alias in either source.
+        configuration.update(
+            {
+                name.replace("CASHU_", "TMP_CASH_", 1): value
+                for name, value in source.items()
+                if name.startswith("CASHU_")
+            }
+        )
+        configuration.update(source)
     parser = argparse.ArgumentParser(
-        description="cashu3 PS ecash mint over Lightning hold invoices"
+        prog="tmp.cash-mint",
+        description="tmp.cash PS ecash mint over Lightning hold invoices",
     )
     parser.add_argument(
         "--data",
         type=Path,
-        default=configuration.get("CASHU_MINT_DATA") or "data/mint-v3",
+        default=configuration.get("TMP_CASH_MINT_DATA") or "data/mint-v3",
     )
     parser.add_argument(
         "--backend",
         choices=["fake", "lnd", "spark"],
-        default=configuration.get("CASHU_MINT_BACKEND") or "fake",
+        default=configuration.get("TMP_CASH_MINT_BACKEND") or "fake",
     )
     parser.add_argument(
-        "--host", default=configuration.get("CASHU_MINT_HOST") or "127.0.0.1"
+        "--host", default=configuration.get("TMP_CASH_MINT_HOST") or "127.0.0.1"
     )
     parser.add_argument(
-        "--port", type=int, default=configuration.get("CASHU_MINT_PORT") or "3338"
+        "--port", type=int, default=configuration.get("TMP_CASH_MINT_PORT") or "3338"
     )
-    parser.set_defaults(admin_token=configuration.get("CASHU_ADMIN_TOKEN") or None)
+    parser.set_defaults(admin_token=configuration.get("TMP_CASH_ADMIN_TOKEN") or None)
     parser.add_argument(
-        "--lnd-endpoint", default=configuration.get("CASHU_LND_ENDPOINT")
-    )
-    parser.add_argument(
-        "--lnd-macaroon", type=Path, default=configuration.get("CASHU_LND_MACAROON")
+        "--lnd-endpoint", default=configuration.get("TMP_CASH_LND_ENDPOINT")
     )
     parser.add_argument(
-        "--lnd-cert", type=Path, default=configuration.get("CASHU_LND_CERT")
+        "--lnd-macaroon", type=Path, default=configuration.get("TMP_CASH_LND_MACAROON")
+    )
+    parser.add_argument(
+        "--lnd-cert", type=Path, default=configuration.get("TMP_CASH_LND_CERT")
     )
     parser.add_argument(
         "--fee-limit-sat",
         type=int,
-        default=configuration.get("CASHU_FEE_LIMIT_SAT") or "10",
+        default=configuration.get("TMP_CASH_FEE_LIMIT_SAT") or "10",
     )
     parser.add_argument(
         "--settle-margin-blocks",
         type=int,
-        default=configuration.get("CASHU_SETTLE_MARGIN_BLOCKS") or "6",
+        default=configuration.get("TMP_CASH_SETTLE_MARGIN_BLOCKS") or "6",
     )
     parser.add_argument(
         "--settle-margin-seconds",
         type=int,
-        default=configuration.get("CASHU_SETTLE_MARGIN_SECONDS") or "120",
+        default=configuration.get("TMP_CASH_SETTLE_MARGIN_SECONDS") or "120",
     )
     parser.add_argument(
         "--lnd-hold-expiry-delta",
         type=int,
-        default=configuration.get("CASHU_LND_HOLD_EXPIRY_DELTA") or "18",
+        default=configuration.get("TMP_CASH_LND_HOLD_EXPIRY_DELTA") or "18",
         help="must match LND's invoices.holdexpirydelta (default: 18 blocks)",
     )
     parser.add_argument(
         "--lnd-token-lifetime-blocks",
         type=int,
-        default=configuration.get("CASHU_LND_TOKEN_LIFETIME_BLOCKS") or "2016",
+        default=configuration.get("TMP_CASH_LND_TOKEN_LIFETIME_BLOCKS") or "2016",
         help="requested redeemable lifetime for new LND holds (default: 2016 blocks, about two weeks)",
     )
     parser.add_argument(
         "--spark-mnemonic-file",
         type=Path,
-        default=configuration.get("CASHU_SPARK_MNEMONIC_FILE"),
+        default=configuration.get("TMP_CASH_SPARK_MNEMONIC_FILE"),
         help="file containing the Spark wallet mnemonic",
     )
-    parser.set_defaults(spark_mnemonic=configuration.get("CASHU_SPARK_MNEMONIC"))
+    parser.set_defaults(spark_mnemonic=configuration.get("TMP_CASH_SPARK_MNEMONIC"))
     parser.add_argument(
         "--spark-network",
         choices=["mainnet", "regtest"],
-        default=configuration.get("CASHU_SPARK_NETWORK") or "mainnet",
+        default=configuration.get("TMP_CASH_SPARK_NETWORK") or "mainnet",
     )
-    parser.set_defaults(spark_api_key=configuration.get("CASHU_SPARK_API_KEY"))
+    parser.set_defaults(spark_api_key=configuration.get("TMP_CASH_SPARK_API_KEY"))
     parser.add_argument(
         "--spark-config-file",
         type=Path,
-        default=configuration.get("CASHU_SPARK_CONFIG_FILE"),
+        default=configuration.get("TMP_CASH_SPARK_CONFIG_FILE"),
         help="private regtest operator, SSP and Esplora connection JSON",
     )
     args = parser.parse_args(argv)
     if args.backend not in {"fake", "lnd", "spark"}:
-        parser.error("CASHU_MINT_BACKEND must be fake, lnd or spark")
+        parser.error("TMP_CASH_MINT_BACKEND must be fake, lnd or spark")
     if not 0 <= args.port <= 65535:
         parser.error("mint port must be between 0 and 65535")
     if args.fee_limit_sat < 0:
@@ -134,9 +146,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         )
     if args.backend == "spark":
         if not args.spark_mnemonic_file and not args.spark_mnemonic:
-            parser.error("Spark needs --spark-mnemonic-file or CASHU_SPARK_MNEMONIC")
+            parser.error("Spark needs --spark-mnemonic-file or TMP_CASH_SPARK_MNEMONIC")
         if args.spark_network not in {"mainnet", "regtest"}:
-            parser.error("CASHU_SPARK_NETWORK must be mainnet or regtest")
+            parser.error("TMP_CASH_SPARK_NETWORK must be mainnet or regtest")
         if args.spark_network == "regtest" and not args.spark_config_file:
             parser.error("Spark regtest needs --spark-config-file")
         if args.spark_network != "regtest" and args.spark_config_file:
@@ -200,7 +212,7 @@ def main() -> None:
     except IncompatibleMintDatabase as exc:
         raise SystemExit(
             f"Cannot open {args.data / 'mint.sqlite3'}: {exc}.\n"
-            "Set CASHU_MINT_DATA in .env to a new v3 directory, "
+            "Set TMP_CASH_MINT_DATA in .env to a new v3 directory, "
             "or pass --data <new-directory>.\n"
             "The existing database and seed must be retained for the old protocol."
         ) from None

@@ -7,13 +7,13 @@ import pytest
 from conftest import PREIMAGE, SEED
 from fastapi.testclient import TestClient
 
-from cashu.api import create_app
-from cashu.client import Client, ClientError
-from cashu.db import BackendError
-from cashu.lightning import FakeBackend, Payment, PaymentState
-from cashu.mint import Mint
-from cashu.models import InvoiceState, preimage_hash
-from cashu.wallet import Wallet
+from tmp_cash.api import create_app
+from tmp_cash.client import Client, ClientError
+from tmp_cash.db import BackendError
+from tmp_cash.lightning import FakeBackend, Payment, PaymentState
+from tmp_cash.mint import Mint
+from tmp_cash.models import InvoiceState, preimage_hash
+from tmp_cash.wallet import Wallet
 
 
 def fund(client, backend, amount=16):
@@ -41,7 +41,7 @@ class PendingPayout(FakeBackend):
 
     async def pay_invoice(self, request, fee_limit_sat=None):
         self.calls += 1
-        from cashu.lightning import invoice_details
+        from tmp_cash.lightning import invoice_details
 
         payment_hash, _ = invoice_details(request)
         with self.db.transaction() as conn:
@@ -186,7 +186,7 @@ def test_v2_database_and_wrong_seed_cannot_be_reinterpreted(service, tmp_path):
 
 
 def test_corrupted_recovery_secret_counts_are_rejected_before_spending(service):
-    from cashu.client import MeltOperation, MintOperation, SwapOperation
+    from tmp_cash.client import MeltOperation, MintOperation, SwapOperation
 
     quote = service.client.quote(16, preimage_hash(PREIMAGE.hex()))
     asyncio.run(service.backend.accept(quote.payment_hash))

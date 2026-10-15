@@ -7,17 +7,17 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from cashu.api import create_app
-from cashu.client import Client
-from cashu.lightning import FakeBackend
-from cashu.mint import Mint
-from cashu.models import Token, preimage_hash
-from cashu.token import decode_token
-from cashu.wallet import Wallet
+from tmp_cash.api import create_app
+from tmp_cash.client import Client
+from tmp_cash.lightning import FakeBackend
+from tmp_cash.mint import Mint
+from tmp_cash.models import Token, preimage_hash
+from tmp_cash.token import decode_token
+from tmp_cash.wallet import Wallet
 
 
 def main():
-    with tempfile.TemporaryDirectory(prefix="cashu-v3-demo-") as directory:
+    with tempfile.TemporaryDirectory(prefix="tmp-cash-v3-demo-") as directory:
         path = Path(directory)
         backend = FakeBackend(path / "fake.sqlite3")
         mint = Mint(path / "mint.sqlite3", os.urandom(32), backend)

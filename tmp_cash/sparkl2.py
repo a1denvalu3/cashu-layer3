@@ -237,7 +237,7 @@ class SparkBackend(HoldInvoiceBackend):
                 response = await sdk.receive_payment(
                     breez.ReceivePaymentRequest(
                         payment_method=breez.ReceivePaymentMethod.BOLT11_INVOICE(
-                            description="cashu3 operator liquidity",
+                            description="tmp.cash operator liquidity",
                             amount_sats=parameters.amount,
                             expiry_secs=parameters.expiry,
                             # No supplied hash: the SDK owns the preimage and claims
@@ -290,7 +290,7 @@ class SparkBackend(HoldInvoiceBackend):
                     response = await sdk.receive_payment(
                         breez.ReceivePaymentRequest(
                             payment_method=breez.ReceivePaymentMethod.BOLT11_INVOICE(
-                                description="cashu3 hold",
+                                description="tmp.cash hold",
                                 amount_sats=amount,
                                 expiry_secs=expiry,
                                 payment_hash=payment_hash,

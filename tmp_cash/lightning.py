@@ -168,7 +168,7 @@ class FakeBackend(HoldInvoiceBackend):
             parameters.amount,
             os.urandom(32),
             expiry=parameters.expiry,
-            description="cashu3 operator liquidity",
+            description="tmp.cash operator liquidity",
         )
         decoded = decode(request)
         return OperatorFundingResponse(
@@ -189,7 +189,7 @@ class FakeBackend(HoldInvoiceBackend):
             if row is not None and row["amount"] != amount:
                 raise BackendError("payment hash already has another invoice amount")
             if row is None:
-                request = self._invoice(amount, payment_hash, expiry, "cashu3 hold")
+                request = self._invoice(amount, payment_hash, expiry, "tmp.cash hold")
                 conn.execute(
                     "INSERT INTO invoices VALUES (?,?,?,?,?,0)",
                     (
@@ -261,7 +261,7 @@ class FakeBackend(HoldInvoiceBackend):
         preimage: bytes,
         *,
         expiry: int = 3600,
-        description: str = "cashu3 receiver",
+        description: str = "tmp.cash receiver",
     ) -> str:
         if len(preimage) != 32 or amount <= 0:
             raise ValueError("need a positive amount and a 32-byte preimage")
@@ -473,7 +473,7 @@ class LndRestBackend(HoldInvoiceBackend):
             {
                 "value": str(parameters.amount),
                 "expiry": str(parameters.expiry),
-                "memo": "cashu3 operator liquidity",
+                "memo": "tmp.cash operator liquidity",
             },
         )
         try:
@@ -509,7 +509,7 @@ class LndRestBackend(HoldInvoiceBackend):
                     "value": str(amount),
                     "expiry": str(expiry),
                     "cltv_expiry": str(self.cltv_expiry),
-                    "memo": "cashu3 hold",
+                    "memo": "tmp.cash hold",
                 },
             )
             response = LndHoldResponse.model_validate(body)

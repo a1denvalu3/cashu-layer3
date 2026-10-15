@@ -1,8 +1,8 @@
 import { it, expect } from "vitest";
 import { encryptBackup, decryptBackup } from "../src/backup";
-import type { Layer3State } from "coco-cashu-core/layer3";
+import type { TmpCashState } from "coco-cashu-core/tmp-cash";
 
-const empty: Layer3State = {
+const empty: TmpCashState = {
   proofs: [],
   operations: [],
   fundings: [],
@@ -31,7 +31,7 @@ it("encrypts authenticated backups and rejects a wrong password or tampering", a
 });
 
 it("refuses to export a backup that exceeds the restore limit", async () => {
-  const state: Layer3State = {
+  const state: TmpCashState = {
     ...empty,
     activity: Array.from({ length: 100_000 }, (_, i) => ({
       id: i.toString(16).padStart(64, "0"),

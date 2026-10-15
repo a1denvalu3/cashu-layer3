@@ -94,4 +94,4 @@ export type { OutputDataLike, OutputDataFactory } from './model/OutputData';
 export { MintInfo } from './model/MintInfo';
 export { WSConnection, injectWebSocketImpl, setGlobalRequestOptions } from './transport';
 export type { RequestFn, RequestArgs, RequestOptions } from './transport';
-export * from './layer3';
+export * from './tmp-cash';
