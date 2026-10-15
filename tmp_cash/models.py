@@ -19,6 +19,7 @@ PrivatePresentationHex = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{77
 Amount = Annotated[int, Field(strict=True, gt=0, le=MAX_AMOUNT)]
 Sats = Annotated[int, Field(strict=True, ge=0, le=MAX_AMOUNT)]
 MAX_PROOFS = 256
+MAX_HTLC_CHECK_HASHES = 100
 
 
 class WireModel(BaseModel):
@@ -63,6 +64,12 @@ class OperatorFundingResponse(WireModel):
     payment_hash: Hex32
     expiry: Annotated[int, Field(ge=0)]
     fee: Sats
+
+
+class HTLCCheckRequest(WireModel):
+    payment_hashes: Annotated[
+        list[Hex32], Field(min_length=1, max_length=MAX_HTLC_CHECK_HASHES)
+    ]
 
 
 class PendingHTLC(WireModel):

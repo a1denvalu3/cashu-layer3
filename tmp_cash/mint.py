@@ -30,6 +30,7 @@ from .keyset import COMMON_H_DST, Keyset, common_h_statements, denominations
 from .lightning import HoldInvoiceBackend, Invoice, PaymentState, invoice_details
 from .models import (
     CheckResponse,
+    HTLCCheckRequest,
     InvoiceState,
     KeysetResponse,
     MeltQuoteRequest,
@@ -223,10 +224,14 @@ class Mint:
             raise MintError("backing HTLC redemption deadline has passed", 409)
         return invoice
 
-    async def pending_htlcs(self) -> PendingHTLCsResponse:
+    async def check_htlcs(self, request: HTLCCheckRequest) -> PendingHTLCsResponse:
+        hashes = list(dict.fromkeys(request.payment_hashes))
+        placeholders = ",".join("?" for _ in hashes)
         with self.db.read() as conn:
             rows = conn.execute(
-                "SELECT * FROM quotes WHERE issued=1 AND closed=0 AND redeemed<amount ORDER BY payment_hash"
+                f"SELECT * FROM quotes WHERE payment_hash IN ({placeholders}) "
+                "AND issued=1 AND closed=0 AND redeemed<amount ORDER BY payment_hash",
+                hashes,
             ).fetchall()
         height = await self.backend.get_block_height()
         semaphore = asyncio.Semaphore(8)
@@ -243,7 +248,9 @@ class Mint:
             closed = {
                 r[0]
                 for r in conn.execute(
-                    "SELECT payment_hash FROM quotes WHERE closed<>0 OR redeemed=amount"
+                    f"SELECT payment_hash FROM quotes WHERE payment_hash IN ({placeholders}) "
+                    "AND (closed<>0 OR redeemed=amount)",
+                    hashes,
                 )
             }
         entries = []

@@ -85,7 +85,12 @@ def test_operator_funding_creates_only_a_backend_invoice(funding_mint, expiry):
         assert invoice["expiry"] > time.time()
         assert len(invoice["payment_hash"]) == 64
         assert funding_mint.backend.calls == [(10000, expiry or 3600)]
-        assert http.get("/v1/htlcs/pending").json()["htlcs"] == []
+        assert (
+            http.post(
+                "/v1/htlcs/check", json={"payment_hashes": [invoice["payment_hash"]]}
+            ).json()["htlcs"]
+            == []
+        )
     with funding_mint.db.read() as conn:
         for table in ("quotes", "nullifiers", "melts"):
             assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0

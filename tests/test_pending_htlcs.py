@@ -46,10 +46,12 @@ def deadline_clock(service, monkeypatch, request):
 
 def test_snapshot_exposes_deadline_and_backing_but_no_secrets(service):
     token, _ = service.fund(12345)
-    response = service.client.http.get("/v1/htlcs/pending")
+    response = service.client.http.post(
+        "/v1/htlcs/check", json={"payment_hashes": [token.payment_hash]}
+    )
     assert response.status_code == 200
     assert response.headers["Cache-Control"] == "no-store"
-    entry = service.client.pending_htlcs().htlcs[0]
+    entry = service.client.check_htlcs([token.payment_hash]).htlcs[0]
     assert entry.amount == 12345
     assert entry.melt_deadline == entry.expires_at - service.mint.settle_margin_seconds
     assert entry.payment_hash == token.payment_hash
@@ -76,7 +78,9 @@ def test_issued_backing_reported_incomplete_fails_closed_instead_of_disappearing
         )
 
     monkeypatch.setattr(service.backend, "get_invoice", stale_invoice)
-    response = service.client.http.get("/v1/htlcs/pending")
+    response = service.client.http.post(
+        "/v1/htlcs/check", json={"payment_hashes": [token.payment_hash]}
+    )
     assert response.status_code == 503
     assert "unavailable" in response.json()["detail"]
     assert service.client.check(
@@ -102,7 +106,7 @@ def test_terminal_backing_invalidates_remaining_fragments(
             service.backend.settle_invoice(bytes.fromhex(token.proofs[0].preimage))
         )
     service.client.credentials(token)
-    assert service.client.pending_htlcs().htlcs == []
+    assert service.client.check_htlcs([token.payment_hash]).htlcs == []
     with pytest.raises(ClientError, match="pending backing"):
         service.client.prepare_swap(token)
     with pytest.raises(ClientError):
@@ -156,7 +160,7 @@ def test_known_preimage_settles_exactly_at_cutoff_and_expires_unspent_tokens(
     assert settlements == []  # Revealing the preimage alone does not claim the hold.
     late_invoice = service.backend.receiver_invoice(1, os.urandom(32))
     late_melt = service.client.prepare_melt(change, late_invoice, fee_reserve=0)
-    entry = service.client.pending_htlcs().htlcs[0]
+    entry = service.client.check_htlcs([token.payment_hash]).htlcs[0]
 
     deadline_clock(-1)
     asyncio.run(service.mint.reconcile_holds())
@@ -184,7 +188,7 @@ def test_known_preimage_settles_exactly_at_cutoff_and_expires_unspent_tokens(
         asyncio.run(service.backend.get_invoice(token.payment_hash)).state
         == InvoiceState.settled
     )
-    assert service.client.pending_htlcs().htlcs == []
+    assert service.client.check_htlcs([token.payment_hash]).htlcs == []
     with pytest.raises(ClientError):
         service.client.prepare_swap(change)
     with pytest.raises(ClientError):
@@ -234,7 +238,7 @@ def test_cutoff_closes_tokens_before_settlement_and_retries_node_failure(
         asyncio.run(service.backend.get_invoice(token.payment_hash)).state
         == InvoiceState.accepted
     )
-    assert service.client.pending_htlcs().htlcs == []
+    assert service.client.check_htlcs([token.payment_hash]).htlcs == []
     response = service.client.http.post(
         "/v1/melt/bolt11", json=late_melt.request.model_dump()
     )
@@ -278,7 +282,7 @@ def test_without_preimage_mint_cannot_settle_and_hold_times_out(
         service.client.prepare_swap(token)
     with service.backend.db.transaction() as conn:
         conn.execute("UPDATE invoices SET expiry=0")
-    assert service.client.pending_htlcs().htlcs == []
+    assert service.client.check_htlcs([token.payment_hash]).htlcs == []
     assert (
         asyncio.run(service.backend.get_invoice(token.payment_hash)).state
         == InvoiceState.canceled
@@ -343,7 +347,7 @@ def test_block_cutoff_uses_lnd_cancellation_height_and_multipart_minimum(
 
     monkeypatch.setattr(service.backend, "get_invoice", get_invoice)
     monkeypatch.setattr(service.backend, "get_block_height", get_height)
-    entry = service.client.pending_htlcs().htlcs[0]
+    entry = service.client.check_htlcs([token.payment_hash]).htlcs[0]
     assert entry.melt_deadline_height == 226
     assert entry.blocks_remaining == 32 and entry.expires_at is None
     service.client.check_backing(token)
@@ -353,12 +357,14 @@ def test_block_cutoff_uses_lnd_cancellation_height_and_multipart_minimum(
 
 
 def test_incomplete_snapshot_fails_closed(service, monkeypatch):
-    service.fund(16)
+    token, _ = service.fund(16)
 
     async def unavailable(payment_hash):
         raise BackendError("node unavailable")
 
     monkeypatch.setattr(service.backend, "get_invoice", unavailable)
-    response = service.client.http.get("/v1/htlcs/pending")
+    response = service.client.http.post(
+        "/v1/htlcs/check", json={"payment_hashes": [token.payment_hash]}
+    )
     assert response.status_code == 503
     assert "htlcs" not in response.json()

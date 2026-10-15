@@ -201,7 +201,7 @@ chmod 600 data/lnd-manual/admin.macaroon
 ```
 
 A fixture reset can replace LND's TLS certificate, macaroon and node identity.
-Stale credentials make `/v1/htlcs/pending` return 503 even while `/v1/keys`
+Stale credentials make `POST /v1/htlcs/check` return 503 even while `/v1/keys`
 returns 200. After a reset, refresh the credentials and restart the mint. If the
 node identity changed, its old invoices are gone: retain the old mint directory
 and seed, then set `TMP_CASH_MINT_DATA` to a fresh directory for the new node.
@@ -400,13 +400,15 @@ The preimage is stored locally and carried with token proofs.
 poetry run tmp.cash --wallet data/alice-v3.sqlite3 send 10
 # If several HTLCs can fund the send, choose --payment-hash <hash>.
 
-# Receiver downloads the full backing list, then refreshes ownership privately.
+# Receiver checks the token's backing hashes, then refreshes ownership.
 poetry run tmp.cash --wallet data/bob-v3.sqlite3 receive <cashuPS-token>
 
 # Can combine different HTLCs. Covers invoice + reserve and returns fee change.
 poetry run tmp.cash --wallet data/bob-v3.sqlite3 pay <bolt11> --fee-reserve 1
 
 poetry run tmp.cash htlcs
+# Check explicit hashes instead of the backings stored in this wallet:
+poetry run tmp.cash htlcs <payment_hash> [<payment_hash> ...]
 poetry run tmp.cash list
 poetry run tmp.cash balance --refresh --verbose
 poetry run tmp.cash pending
@@ -425,9 +427,9 @@ operation. All receive requests and input proofs are saved atomically before
 the first swap is submitted, so interruption cannot discard later backings.
 An interrupted split send also retains its requested amount; retry marks exactly
 those outgoing proofs `SENT` while keeping change available. Payments may combine
-backings. An unavailable or incomplete public
-backing snapshot fails the acceptance check. No hash-specific request reveals
-which HTLC the receiver is inspecting.
+backings. An unavailable or incomplete backing check fails the acceptance check.
+Wallets request only known backing hashes. These lookups disclose the inspected
+HTLCs to the mint; checking several together can associate them with one wallet.
 
 Private swaps hide the backing hash from the mint, so the server does not check
 an individual HTLC's liveness during a swap. Wallets check before sending or
@@ -437,7 +439,7 @@ cannot extend the HTLC's lifetime.
 
 Local `LIVE` state and an unrefreshed balance are not proof of current backing.
 `balance --refresh` marks unavailable claims `EXPIRED`; it never revives spent
-proofs. The public full list is a mint-reported snapshot, not independent
+proofs. The backing response is a mint-reported snapshot, not independent
 collateral verification, and backing can change after the check.
 
 ## Melt fees, allocation and recovery
@@ -514,7 +516,7 @@ FastAPI provides schemas at `/docs`.
 | Endpoint | Purpose |
 |---|---|
 | `GET /v1/info`, `GET /v1/keys` | Capabilities and denomination public keys |
-| `GET /v1/htlcs/pending` | Fresh full backing list and redemption cutoffs |
+| `POST /v1/htlcs/check` | Fresh backing status and cutoffs for supplied payment hashes |
 | `POST /v1/mint/quote/bolt11` | Supplied-hash HODL invoice |
 | `GET /v1/mint/quote/bolt11/{quote}` | Funding/issuance status |
 | `POST /v1/mint/bolt11` | Issue a denomination batch for the full funded amount |
@@ -522,6 +524,29 @@ FastAPI provides schemas at `/docs`.
 | `POST /v1/melt/quote/bolt11` | Payout quote and routing fee reserve |
 | `POST /v1/melt/bolt11` | Combined melt and original-HTLC fee change |
 | `POST /v1/checkstate` | `UNSPENT`, `PENDING`, or `SPENT` nullifier states |
+
+Backing checks require a JSON body with 1–100 lowercase, 64-character payment
+hashes. Duplicate hashes are checked once. For example:
+
+```json
+{"payment_hashes": ["<payment_hash>", "<payment_hash>"]}
+```
+
+The response retains `checked_at`, `block_height`, and `htlcs`; the latter lists
+only requested, issued, still-pending backings with remaining value. Unknown,
+unissued, and closed backings are omitted. A backend lookup failure returns 503,
+not an empty successful result. Responses use `Cache-Control: no-store`.
+Knowing a payment hash permits querying it; this is not proof of token ownership.
+No preimage or credential is required or exposed.
+
+The unfiltered `GET /v1/htlcs/pending` endpoint has been removed. Upgrade the mint
+and wallets together; older wallets cannot perform backing checks against this
+API. Python clients use `check_htlcs(hashes)` and browser clients use
+`checkHTLCs(hashes)`. Both deduplicate hashes and split larger checks into batches
+of at most 100. An empty local wallet performs no backing request. There is no
+public endpoint to enumerate all pending holds. Targeted checks reduce response
+size and backend work, but disclose which backings a client checks even though
+swap proofs themselves hide the backing hash.
 
 Successful mint, swap and melt POST responses are cached in memory per server
 process for five minutes, with at most 1,024 entries and 16 MiB of serialized

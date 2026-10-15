@@ -117,6 +117,13 @@ These are experimental `cashuPS` tokens, incompatible with standard Cashu token
 formats. Backing status depends on the mint/backend's reported snapshot; see the
 root README for the Breez SDK's cached-status limitation.
 
+The wallet checks only its known backing hashes through `POST /v1/htlcs/check`,
+including tokens being received. Requests contain at most 100 distinct hashes;
+larger wallets use multiple batches. Checks disclose those hashes to the mint,
+and a batch can associate several backings with one wallet. No preimages are
+sent for a backing check. Update the frontend together with the mint: the old
+unfiltered `/v1/htlcs/pending` endpoint is no longer available.
+
 ## Build and verify
 
 ```sh

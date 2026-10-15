@@ -77,6 +77,20 @@ afterAll(async () => {
 });
 
 describe("Python mint ↔ browser cashu-ts protocol", () => {
+  it("checks only supplied backing hashes and removes public enumeration", async () => {
+    const selected = await mint(16),
+      unrelated = await mint(32);
+    const snapshot = await wallet.checkHTLCs([selected.proofs[0].payment_hash]);
+    expect(snapshot.htlcs.map((h) => h.payment_hash)).toEqual([
+      selected.proofs[0].payment_hash,
+    ]);
+    expect(JSON.stringify(snapshot)).not.toContain(
+      unrelated.proofs[0].payment_hash,
+    );
+    expect(JSON.stringify(snapshot)).not.toContain(selected.proofs[0].preimage);
+    expect((await fetch(mintUrl + "/v1/htlcs/pending")).status).toBe(404);
+  });
+
   it("bypasses ngrok warnings for mint reads and quote requests", async () => {
     const requests: { method: string; headers: Headers }[] = [];
     const tunneled = new PSWallet(
@@ -180,10 +194,20 @@ describe("Python mint ↔ browser cashu-ts protocol", () => {
       ),
     ).toBe(true);
     expect(
-      (await wallet.pendingHTLCs()).htlcs.map((p) => p.payment_hash),
+      (
+        await wallet.checkHTLCs([
+          first.proofs[0].payment_hash,
+          second.proofs[0].payment_hash,
+        ])
+      ).htlcs.map((p) => p.payment_hash),
     ).not.toContain(first.proofs[0].payment_hash);
     expect(
-      (await wallet.pendingHTLCs()).htlcs.map((p) => p.payment_hash),
+      (
+        await wallet.checkHTLCs([
+          first.proofs[0].payment_hash,
+          second.proofs[0].payment_hash,
+        ])
+      ).htlcs.map((p) => p.payment_hash),
     ).toContain(second.proofs[0].payment_hash);
     expect(await wallet.finishMelt(op)).toEqual(result);
   });
@@ -457,7 +481,7 @@ describe("Coco operation journal and IndexedDB", () => {
     const pending = new Promise<void>((resolve) => (started = resolve));
     const released = new Promise<void>((resolve) => (resume = resolve));
     const manager = new TmpCashManager(repo, mintUrl, async (input, init) => {
-      if (slow && String(input).endsWith("/v1/htlcs/pending")) {
+      if (slow && String(input).endsWith("/v1/htlcs/check")) {
         snapshots++;
         if (snapshots === 1) {
           started();
@@ -489,7 +513,7 @@ describe("Coco operation journal and IndexedDB", () => {
     const resume = new Promise<void>((resolve) => (resumeMint = resolve));
     const manager = new TmpCashManager(repo, mintUrl, async (input, init) => {
       const url = String(input);
-      if (url.endsWith("/v1/htlcs/pending")) snapshots++;
+      if (url.endsWith("/v1/htlcs/check")) snapshots++;
       const response = await fetch(input, init);
       if (url.endsWith("/v1/mint/bolt11")) {
         mintStarted();
@@ -787,7 +811,7 @@ describe("Coco operation journal and IndexedDB", () => {
     await expect(manager.melt(quote)).rejects.toThrow("Lost");
     expect((await repo.read()).operations).toHaveLength(1);
     expect(
-      (await wallet.pendingHTLCs()).htlcs.some(
+      (await wallet.checkHTLCs([funding.id])).htlcs.some(
         (h) => h.payment_hash === funding.id,
       ),
     ).toBe(false);
@@ -1083,7 +1107,7 @@ describe("Coco operation journal and IndexedDB", () => {
     const proof = (await repo.read()).proofs.find(
       (p) => p.state === "ready",
     )!.proof;
-    const snapshot = await wallet.pendingHTLCs(),
+    const snapshot = await wallet.checkHTLCs([f.id]),
       backing = snapshot.htlcs.find((h) => h.payment_hash === f.id)!;
     expect(() =>
       checkPSBacking(proof, snapshot, backing.melt_deadline!),

@@ -1290,7 +1290,9 @@ export function App() {
                   const token = manager!.wallet.verifyToken(
                     decodePSToken(encoded),
                   );
-                  const snapshot = await manager!.wallet.pendingHTLCs();
+                  const snapshot = await manager!.wallet.checkHTLCs(
+                    token.proofs.map((proof) => proof.payment_hash),
+                  );
                   const now = Math.max(
                     Math.floor(Date.now() / 1000),
                     snapshot.checked_at,

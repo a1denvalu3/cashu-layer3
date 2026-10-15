@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const MAX_AMOUNT = 2_100_000_000_000_000;
 export const MAX_PROOFS = 256;
+export const MAX_HTLC_CHECK_HASHES = 100;
 export const DENOMINATIONS = Array.from({ length: 51 }, (_, i) => 2 ** i);
 export const sats = z.number().int().min(0).max(MAX_AMOUNT).safe();
 export const amount = sats.refine((n) => n > 0, "Amount must be positive");
@@ -46,7 +47,7 @@ export const snapshotSchema = z
   .object({
     checked_at: timestamp,
     block_height: timestamp.nullable(),
-    htlcs: z.array(backingSchema).max(100000),
+    htlcs: z.array(backingSchema).max(MAX_HTLC_CHECK_HASHES),
   })
   .strict();
 export type PSBacking = z.infer<typeof backingSchema>;

@@ -110,13 +110,15 @@ export class TmpCashManager {
       // Capture claims before the remote snapshot, while holding the same lock
       // as issuance and spending. An older snapshot must not expire new outputs.
       const state = await this.repo.read();
-      this.snapshot = await this.wallet.pendingHTLCs();
       const changes: { id: string; state: TmpCashProofRecord["state"] }[] = [];
       const candidates = state.proofs.filter(
         (p) =>
           p.mint === this.wallet.mintUrl &&
           p.operationId === null &&
           ["ready", "sent", "pending", "expired"].includes(p.state),
+      );
+      this.snapshot = await this.wallet.checkHTLCs(
+        candidates.map((p) => p.proof.payment_hash),
       );
       for (const p of candidates)
         if (p.state !== "expired" && !this.isLive(p.proof))

@@ -307,7 +307,12 @@ def test_operator_funding_uses_an_ordinary_invoice_without_creating_ecash(
         assert sdk.receives[0].amount_sats == 10000
         assert sdk.receives[0].description == "tmp.cash operator liquidity"
         assert not sdk.claims and not sdk.sends
-        assert http.get("/v1/htlcs/pending").json()["htlcs"] == []
+        assert (
+            http.post(
+                "/v1/htlcs/check", json={"payment_hashes": [invoice["payment_hash"]]}
+            ).json()["htlcs"]
+            == []
+        )
     for db, table in ((backend.db, "invoices"), (mint.db, "quotes")):
         with db.read() as conn:
             assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -615,14 +620,19 @@ def test_missing_sdk_hold_does_not_publish_an_empty_live_backing_list(
         quote = client.quote(100, payment_hash, expiry=60)
         payment = sdk.fund(payment_hash)
         token = client.finish_mint(client.prepare_mint(quote.quote, preimage.hex()))
-        assert len(client.pending_htlcs().htlcs) == 1
+        assert len(client.check_htlcs([payment_hash]).htlcs) == 1
         sdk.payments.clear()
         now += elapsed
-        assert http.get("/v1/htlcs/pending").status_code == 503
+        assert (
+            http.post(
+                "/v1/htlcs/check", json={"payment_hashes": [payment_hash]}
+            ).status_code
+            == 503
+        )
 
         sdk.payments.append(payment)
         client.check_backing(token)
-        assert len(client.pending_htlcs().htlcs) == 1
+        assert len(client.check_htlcs([payment_hash]).htlcs) == 1
 
 
 async def test_sync_errors_do_not_masquerade_as_missing_payment(spark):
@@ -912,7 +922,7 @@ def test_partial_melt_claims_at_exact_spark_cutoff_and_expires_remaining_tokens(
         assert receipt.fee == 0
         assert sum(p.amount for p in change.proofs) == 991
         assert sdk.claims == []
-        entry = client.pending_htlcs().htlcs[0]
+        entry = client.check_htlcs([payment_hash]).htlcs[0]
         assert entry.payment_hash == payment_hash
         assert (
             entry.melt_deadline
@@ -931,7 +941,7 @@ def test_partial_melt_claims_at_exact_spark_cutoff_and_expires_remaining_tokens(
         assert "deadline" in response.json()["detail"]
         asyncio.run(mint.reconcile_holds())
         assert sdk.claims == [preimage.hex()]
-        assert client.pending_htlcs().htlcs == []
+        assert client.check_htlcs([payment_hash]).htlcs == []
         with pytest.raises(ClientError):
             client.prepare_swap(change)
         with pytest.raises(ClientError):
