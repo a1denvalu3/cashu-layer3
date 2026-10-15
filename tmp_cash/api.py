@@ -16,6 +16,7 @@ from .models import (
     CheckRequest,
     CheckResponse,
     Hex32,
+    HTLCCheckRequest,
     KeysetResponse,
     MeltQuoteRequest,
     MeltQuoteResponse,
@@ -153,7 +154,7 @@ def create_app(
             "swap": "same-htlc-many-to-many",
             "redemption": "combined-htlc-melt-with-fee-change",
             "expiry": "tokens-expire-with-backing-htlc",
-            "pending_htlcs": "/v1/htlcs/pending",
+            "pending_htlcs": "/v1/htlcs/check",
             "settle_margin_blocks": mint.settle_margin_blocks,
             "settle_margin_seconds": mint.settle_margin_seconds,
             "default_token_lifetime_blocks": token_lifetime,
@@ -164,10 +165,10 @@ def create_app(
     async def keys():
         return mint.keyset()
 
-    @app.get("/v1/htlcs/pending", response_model=PendingHTLCsResponse)
-    async def pending_htlcs(response: Response):
+    @app.post("/v1/htlcs/check", response_model=PendingHTLCsResponse)
+    async def check_htlcs(request: HTLCCheckRequest, response: Response):
         response.headers["Cache-Control"] = "no-store"
-        return await mint.pending_htlcs()
+        return await mint.check_htlcs(request)
 
     @app.post("/v1/mint/quote/bolt11", response_model=QuoteResponse)
     async def quote(request: QuoteRequest):

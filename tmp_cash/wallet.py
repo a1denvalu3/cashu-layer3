@@ -367,7 +367,9 @@ class Wallet:
                 if Token.model_validate_json(row["token"]).mint.rstrip("/")
                 == client.mint_url
             ]
-        snapshot = client.pending_htlcs()
+        snapshot = client.check_htlcs(
+            Token.model_validate_json(row["token"]).payment_hash for row in candidates
+        )
         changes = []
         for row in candidates:
             token = Token.model_validate_json(row["token"])

@@ -39,7 +39,7 @@ async function setDeadline(
   deadline: { seconds: number } | { blocks: number },
 ) {
   const hashes = new Set(token.proofs.map((proof) => proof.payment_hash));
-  await page.route(mintUrl + "/v1/htlcs/pending", async (route) => {
+  await page.route(mintUrl + "/v1/htlcs/check", async (route) => {
     const response = await route.fetch();
     const snapshot: PSSnapshot = await response.json();
     if ("blocks" in deadline) {
@@ -127,7 +127,9 @@ for (const deadline of [{ seconds: 1200 }, { seconds: 1201 }, { blocks: 2 }]) {
     });
     await openReceive(page, token);
     // Fix browser time behind the fresh mint snapshot for the exact boundary.
-    const response = await page.request.get(mintUrl + "/v1/htlcs/pending");
+    const response = await page.request.post(mintUrl + "/v1/htlcs/check", {
+      data: { payment_hashes: token.proofs.map((proof) => proof.payment_hash) },
+    });
     const snapshot: PSSnapshot = await response.json();
     await page.clock.setFixedTime(new Date(snapshot.checked_at * 1000));
     await page

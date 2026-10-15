@@ -120,13 +120,13 @@ def test_wallet_rejects_previous_protocol(tmp_path):
 
 def test_refresh_does_not_expire_coins_minted_after_snapshot(service, monkeypatch):
     wallet = Wallet(service.path / "wallet.sqlite3")
-    stale = service.client.pending_htlcs()
+    stale = service.client.check_htlcs([])
 
-    def delayed_snapshot():
+    def delayed_snapshot(hashes):
         mint_to_wallet(service, wallet, 100)
         return stale
 
-    monkeypatch.setattr(service.client, "pending_htlcs", delayed_snapshot)
+    monkeypatch.setattr(service.client, "check_htlcs", delayed_snapshot)
     wallet.refresh(service.client)
     assert live_amount(wallet) == 100
 
@@ -139,12 +139,14 @@ def test_refresh_recovers_false_expiry_preserving_sent_state(
     mint_to_wallet(service, wallet)
     if sent:
         wallet.send(service.client, 16)
-    pending = service.client.pending_htlcs
-    snapshot = pending().model_copy(update={"htlcs": []})
-    monkeypatch.setattr(service.client, "pending_htlcs", lambda: snapshot)
+    pending = service.client.check_htlcs
+    snapshot = pending(r["payment_hash"] for r in wallet.tokens()).model_copy(
+        update={"htlcs": []}
+    )
+    monkeypatch.setattr(service.client, "check_htlcs", lambda hashes: snapshot)
     wallet.refresh(service.client)
     assert {r["state"] for r in wallet.tokens()} == {"EXPIRED"}
-    monkeypatch.setattr(service.client, "pending_htlcs", pending)
+    monkeypatch.setattr(service.client, "check_htlcs", pending)
     wallet.refresh(service.client)
     assert {r["state"] for r in wallet.tokens()} == {"SENT" if sent else "LIVE"}
     assert live_amount(wallet) == (0 if sent else 16)

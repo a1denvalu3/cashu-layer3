@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   MAX_AMOUNT,
+  MAX_HTLC_CHECK_HASHES,
   DENOMINATIONS,
   amount,
   denomination,
@@ -260,8 +261,57 @@ export class PSWallet {
     this.validateQuote(quote);
     return quote;
   }
-  async pendingHTLCs(): Promise<PSSnapshot> {
-    return snapshotSchema.parse(await this.request("/v1/htlcs/pending"));
+  async checkHTLCs(paymentHashes: string[]): Promise<PSSnapshot> {
+    const hashes = [...new Set(paymentHashes.map((hash) => hex32.parse(hash)))];
+    const snapshot: PSSnapshot = {
+      checked_at: hashes.length ? 0 : Math.floor(Date.now() / 1000),
+      block_height: null,
+      htlcs: [],
+    };
+    let blockClock: boolean | undefined;
+    for (let i = 0; i < hashes.length; i += MAX_HTLC_CHECK_HASHES) {
+      const batch = hashes.slice(i, i + MAX_HTLC_CHECK_HASHES);
+      const response = snapshotSchema.parse(
+        await this.request("/v1/htlcs/check", { payment_hashes: batch }),
+      );
+      const returned = response.htlcs.map((entry) => entry.payment_hash);
+      if (
+        new Set(returned).size !== returned.length ||
+        returned.some((hash) => !batch.includes(hash))
+      )
+        throw new PSMintError("Mint returned unexpected backing HTLCs");
+      for (const entry of response.htlcs)
+        if (
+          response.block_height !== null &&
+          entry.expiry_height !== null &&
+          entry.blocks_remaining !== entry.expiry_height - response.block_height
+        )
+          throw new PSMintError(
+            "Mint returned inconsistent backing block height",
+          );
+      const hasHeight = response.block_height !== null;
+      if (blockClock !== undefined && blockClock !== hasHeight)
+        throw new PSMintError(
+          "Mint changed backing deadline clock during check",
+        );
+      blockClock = hasHeight;
+      snapshot.checked_at = Math.max(snapshot.checked_at, response.checked_at);
+      if (response.block_height !== null)
+        snapshot.block_height = Math.max(
+          snapshot.block_height ?? 0,
+          response.block_height,
+        );
+      snapshot.htlcs.push(...response.htlcs);
+    }
+    // Use the latest observed height across batches without extending any cutoff.
+    const height = snapshot.block_height;
+    if (height !== null)
+      snapshot.htlcs = snapshot.htlcs.flatMap((entry) => {
+        if (entry.expiry_height === null) return [entry];
+        if (entry.expiry_height < height) return [];
+        return [{ ...entry, blocks_remaining: entry.expiry_height - height }];
+      });
+    return snapshot;
   }
   verifyProof(proof: PSProof): PSCredential {
     this.ready();
@@ -385,7 +435,9 @@ export class PSWallet {
         psTokenAmount(token)
     )
       throw new Error("Swap outputs must preserve value");
-    const snapshot = await this.pendingHTLCs(),
+    const snapshot = await this.checkHTLCs(
+        token.proofs.map((p) => p.payment_hash),
+      ),
       backing = checkPSBacking(token.proofs[0], snapshot);
     const credentials = token.proofs.map((p) => this.verifyProof(p));
     const prepared = amounts.map(ownerOutput),
@@ -483,7 +535,7 @@ export class PSWallet {
     quote: PSMeltQuote,
   ): Promise<PSMeltOperation> {
     const token = this.verifyToken(input),
-      snapshot = await this.pendingHTLCs();
+      snapshot = await this.checkHTLCs(token.proofs.map((p) => p.payment_hash));
     if (psTokenAmount(token) < quote.amount + quote.fee_reserve)
       throw new Error("Not enough tokens to cover invoice and fee reserve");
     const groups = new Map<string, number>();

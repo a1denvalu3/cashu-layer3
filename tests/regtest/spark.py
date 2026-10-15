@@ -227,7 +227,9 @@ async def main():
                     ).state == InvoiceState.settled
 
                 await wait_until("explicit delayed claim", closed)
-                snapshot = await asyncio.to_thread(client.pending_htlcs)
+                snapshot = await asyncio.to_thread(
+                    client.check_htlcs, [token.proofs[0].payment_hash]
+                )
                 if snapshot.htlcs:
                     raise RuntimeError("settled backing still has live tokens")
                 print(

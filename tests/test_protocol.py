@@ -247,7 +247,7 @@ def test_partial_melt_returns_fee_change_and_keeps_hold_pending(service):
     assert change.amount == 4
     assert change.payment_hash == token.payment_hash
     assert state(service, token) == InvoiceState.accepted
-    assert len(service.client.pending_htlcs().htlcs) == 1
+    assert len(service.client.check_htlcs([token.payment_hash]).htlcs) == 1
     with service.mint.db.read() as conn:
         assert conn.execute("SELECT redeemed,reserved FROM quotes").fetchone()[:] == (
             12,
@@ -261,7 +261,7 @@ def test_partial_melt_returns_fee_change_and_keeps_hold_pending(service):
     )
     assert final.change == []
     assert state(service, token) == InvoiceState.settled
-    assert service.client.pending_htlcs().htlcs == []
+    assert service.client.check_htlcs([token.payment_hash]).htlcs == []
 
 
 def test_routing_fees_count_toward_full_redemption(service):

@@ -2,6 +2,7 @@
 
 import os
 import time
+from collections.abc import Iterable
 from typing import Literal
 
 import httpx
@@ -22,11 +23,13 @@ from .crypto.ps import (
 )
 from .keyset import COMMON_H_DST, common_h_statements, denominations, keyset_id
 from .models import (
+    MAX_HTLC_CHECK_HASHES,
     BlindOutput,
     ChangeOutput,
     CheckRequest,
     CheckResponse,
     Hex32,
+    HTLCCheckRequest,
     KeysetResponse,
     MeltInput,
     MeltQuoteRequest,
@@ -197,8 +200,54 @@ class Client:
             self._get(f"/v1/mint/quote/bolt11/{quote_id}")
         )
 
-    def pending_htlcs(self) -> PendingHTLCsResponse:
-        return PendingHTLCsResponse.model_validate_json(self._get("/v1/htlcs/pending"))
+    def check_htlcs(self, payment_hashes: Iterable[str]) -> PendingHTLCsResponse:
+        """Check only known hashes, splitting large wallets into bounded requests."""
+        hashes = list(dict.fromkeys(payment_hashes))
+        requests = [
+            HTLCCheckRequest(payment_hashes=hashes[i : i + MAX_HTLC_CHECK_HASHES])
+            for i in range(0, len(hashes), MAX_HTLC_CHECK_HASHES)
+        ]
+        snapshots = []
+        for request in requests:
+            snapshot = PendingHTLCsResponse.model_validate_json(
+                self._post("/v1/htlcs/check", request)
+            )
+            returned = [entry.payment_hash for entry in snapshot.htlcs]
+            if len(set(returned)) != len(returned) or not set(returned) <= set(
+                request.payment_hashes
+            ):
+                raise ClientError("mint returned unexpected backing HTLCs")
+            for entry in snapshot.htlcs:
+                if (
+                    snapshot.block_height is not None
+                    and entry.expiry_height is not None
+                    and entry.blocks_remaining
+                    != entry.expiry_height - snapshot.block_height
+                ):
+                    raise ClientError("mint returned inconsistent backing block height")
+            snapshots.append(snapshot)
+        heights = {snapshot.block_height for snapshot in snapshots}
+        if None in heights and len(heights) > 1:
+            raise ClientError("mint changed backing deadline clock during check")
+        height = max((h for h in heights if h is not None), default=None)
+        entries = []
+        for snapshot in snapshots:
+            for entry in snapshot.htlcs:
+                if height is not None and entry.expiry_height is not None:
+                    if entry.expiry_height < height:
+                        continue
+                    entry = entry.model_copy(
+                        update={"blocks_remaining": entry.expiry_height - height}
+                    )
+                entries.append(entry)
+        return PendingHTLCsResponse(
+            checked_at=max(
+                (snapshot.checked_at for snapshot in snapshots),
+                default=int(time.time()),
+            ),
+            block_height=height,
+            htlcs=entries,
+        )
 
     def credential(
         self, proof: TokenProof, keys: dict[int, MintPublicKeyPS] | None = None
@@ -253,7 +302,7 @@ class Client:
         self, token: Token, snapshot: PendingHTLCsResponse | None = None
     ) -> list[PendingHTLC]:
         self.credentials(token)
-        snapshot = snapshot or self.pending_htlcs()
+        snapshot = snapshot or self.check_htlcs(p.payment_hash for p in token.proofs)
         return [self._check_backing(proof, snapshot) for proof in token.proofs]
 
     def prepare_mint(self, quote_id: str, preimage: str | None = None) -> MintOperation:
@@ -335,7 +384,7 @@ class Client:
         _ = token.payment_hash  # Reject mixed-HTLC swaps locally.
         keys = self.keyset()
         credentials = self.credentials(token, keys)
-        snapshot = self.pending_htlcs()
+        snapshot = self.check_htlcs([token.payment_hash])
         backing = self._check_backing(token.proofs[0], snapshot)
         for proof in token.proofs:
             self._check_backing(proof, snapshot)

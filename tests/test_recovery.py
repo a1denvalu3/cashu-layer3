@@ -111,7 +111,7 @@ def test_settlement_failure_does_not_lose_paid_receipt_or_repay(tmp_path):
         receipt = client.finish_melt(operation)
         assert receipt.state == "PAID"
         assert client.finish_melt(operation) == receipt
-        assert client.pending_htlcs().htlcs == []
+        assert client.check_htlcs([token.payment_hash]).htlcs == []
     normal = FakeBackend(backend.db.path)
     reopened = Mint(mint.db.path, SEED, normal)
     asyncio.run(reopened.resume_pending_melts())

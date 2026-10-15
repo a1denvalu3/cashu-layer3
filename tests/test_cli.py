@@ -69,6 +69,23 @@ def test_decode_does_not_create_wallet(service, monkeypatch, capsys):
     assert not path.exists()
 
 
+def test_htlcs_checks_only_wallet_or_explicit_hashes(service, monkeypatch, capsys):
+    path = service.path / "wallet.sqlite3"
+    token, _ = service.fund(16)
+    run(monkeypatch, service, path, "htlcs")
+    assert json.loads(capsys.readouterr().out)["htlcs"] == []
+    run(monkeypatch, service, path, "htlcs", token.payment_hash)
+    assert [
+        h["payment_hash"] for h in json.loads(capsys.readouterr().out)["htlcs"]
+    ] == [token.payment_hash]
+    run(monkeypatch, service, path, "receive", encode_token(token))
+    capsys.readouterr()
+    run(monkeypatch, service, path, "htlcs")
+    assert [
+        h["payment_hash"] for h in json.loads(capsys.readouterr().out)["htlcs"]
+    ] == [token.payment_hash]
+
+
 def test_invalid_send_reports_actionable_error(service, monkeypatch, capsys):
     path = service.path / "empty.sqlite3"
     with pytest.raises(SystemExit) as exc:

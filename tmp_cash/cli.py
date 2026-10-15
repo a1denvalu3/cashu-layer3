@@ -108,7 +108,10 @@ def main() -> None:
     mint.add_argument("--expiry", type=int, default=3600)
     mint.add_argument("--preimage")
     sub.add_parser("list")
-    sub.add_parser("htlcs")
+    htlcs = sub.add_parser(
+        "htlcs", help="check backing for supplied hashes or this wallet"
+    )
+    htlcs.add_argument("payment_hashes", nargs="*")
     balance = sub.add_parser("balance")
     balance.add_argument("--verbose", "-v", action="store_true")
     balance.add_argument(
@@ -197,7 +200,12 @@ def main() -> None:
         elif args.command == "list":
             print(json.dumps(wallet.tokens(), indent=2))
         elif args.command == "htlcs":
-            print(client.pending_htlcs().model_dump_json(indent=2))
+            hashes = args.payment_hashes or [
+                row["payment_hash"]
+                for row in wallet.tokens()
+                if row["mint"].rstrip("/") == client.mint_url
+            ]
+            print(client.check_htlcs(hashes).model_dump_json(indent=2))
         elif args.command == "balance":
             if args.refresh:
                 wallet.refresh(client)

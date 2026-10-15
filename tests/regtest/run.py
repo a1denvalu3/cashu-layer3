@@ -240,7 +240,7 @@ def exercise(
                 assert receipt.fee == 0 and receipt.change == []
                 assert receipt.payout_hash == payout_hash
                 assert client.get_quote(quote.quote).state == InvoiceState.settled
-                assert client.pending_htlcs().htlcs == []
+                assert client.check_htlcs([token.payment_hash]).htlcs == []
                 assert client.check(
                     [client.nullifier(p) for p in token.proofs]
                 ).states == ["SPENT"] * len(token.proofs)
