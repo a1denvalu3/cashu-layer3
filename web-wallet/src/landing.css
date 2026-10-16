@@ -321,6 +321,25 @@
 .art-fragment > span:last-child {
   justify-content: flex-start;
 }
+@media (prefers-reduced-motion: no-preference) {
+  .art-note,
+  .art-fragment {
+    animation: cash-float 6s ease-in-out infinite;
+  }
+  .art-fragment {
+    animation-duration: 7s;
+    animation-delay: -3s;
+  }
+}
+@keyframes cash-float {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  50% {
+    translate: 0 -8px;
+  }
+}
 .landing-art figcaption {
   display: flex;
   align-items: center;

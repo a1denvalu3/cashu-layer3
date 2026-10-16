@@ -21,7 +21,7 @@ test("shows the frozen deposit and hidden ownership changes without connecting a
   });
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    /Ecash from a\s*frozen deposit\./,
+    /Digital cash,\s*No custodian/,
   );
   await expect(
     page.getByRole("heading", {
@@ -260,7 +260,7 @@ test("serves a direct wallet entry and distinct page metadata", async ({
   expect(landing.ok()).toBe(true);
   expect(wallet.ok()).toBe(true);
   expect(await landing.text()).toContain(
-    "<title>tmp.cash — Ecash from a frozen deposit</title>",
+    "<title>tmp.cash — Digital cash, No custodian</title>",
   );
   expect(await wallet.text()).toContain(
     "<title>tmp.cash wallet — Cash with a deadline</title>",
