@@ -421,9 +421,9 @@ export function LandingPage() {
                 <span /> tmp.cash / EXPLAINED
               </span>
               <h1 id="hero-title">
-                Ecash from a
+                Digital cash,
                 <br />
-                <span>frozen deposit.</span>
+                <span>No custodian</span>
               </h1>
               <p>
                 You make a Lightning deposit and receive ecash. The deposit
