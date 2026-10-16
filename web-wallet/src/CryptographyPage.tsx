@@ -239,7 +239,13 @@ export function CryptographyPage() {
                   binary denomination: 1, 2, 4, 8 sats, and so on.
                 </p>
                 <Equation>
-                  {"σ = (u, v)\nv = (x_d + yₕ,d · h + yₛ,d · s) · u"}
+                  {"σ = (u, v)\nv = (x"}
+                  <sub>d</sub>
+                  {" + y"}
+                  <sub>h,d</sub>
+                  {" · h + y"}
+                  <sub>s,d</sub>
+                  {" · s) · u"}
                 </Equation>
                 <p>
                   The subscript <code>d</code> selects the denomination’s key.
@@ -274,9 +280,18 @@ export function CryptographyPage() {
                   <p>
                     <code>G₁</code> and <code>G₂</code> are generators of the
                     two BLS12-381 groups. The mint publishes{" "}
-                    <code>X₂ = x_d · G₂</code>, <code>Yₕ,₂ = yₕ,d · G₂</code>,
-                    and <code>Yₛ,₂ = yₛ,d · G₂</code>. With <code>e</code>{" "}
-                    denoting the pairing:
+                    <code>
+                      X₂ = x<sub>d</sub> · G₂
+                    </code>
+                    ,{" "}
+                    <code>
+                      Yₕ,₂ = y<sub>h,d</sub> · G₂
+                    </code>
+                    , and{" "}
+                    <code>
+                      Yₛ,₂ = y<sub>s,d</sub> · G₂
+                    </code>
+                    . With <code>e</code> denoting the pairing:
                   </p>
                   <Equation>
                     {"e(v, G₂) = e(u, X₂ + h · Yₕ,₂) · e(s · u, Yₛ,₂)"}
@@ -360,9 +375,11 @@ export function CryptographyPage() {
                     <code>kⱼ</code>:
                   </p>
                   <Equation>
-                    {
-                      "uⱼ = kⱼ · G₁\nv_raw,j = kⱼ · (x_d · G₁ + Bⱼ + yₛ,d · Sⱼ)\nvⱼ = v_raw,j − tⱼ · uⱼ"
-                    }
+                    {"uⱼ = kⱼ · G₁\nv_raw,j = kⱼ · (x"}
+                    <sub>d</sub>
+                    {" · G₁ + Bⱼ + y"}
+                    <sub>s,d</sub>
+                    {" · Sⱼ)\nvⱼ = v_raw,j − tⱼ · uⱼ"}
                   </Equation>
                   <p>
                     Removing the blinding gives a PS signature on the original

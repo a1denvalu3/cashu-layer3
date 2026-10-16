@@ -158,6 +158,11 @@
 .crypto-equation code {
   font-size: inherit;
 }
+.crypto-article sub {
+  font-size: 0.75em;
+  line-height: 0;
+  vertical-align: sub;
+}
 .crypto-aside {
   margin: 24px 0;
   padding: 4px 0 4px 19px;
