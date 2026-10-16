@@ -9,7 +9,7 @@ import hashlib
 import json
 import time
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import breez_sdk_spark as breez
 from bolt11 import decode
@@ -180,15 +180,21 @@ class SparkBackend(HoldInvoiceBackend):
                     raise BackendError("Spark SDK connection failed") from None
             return self.sdk
 
-    async def _find_payment(
+    async def _find_payments(
         self,
         payment_hash: str,
         direction: breez.PaymentType,
-        payment_id: str | None = None,
-    ) -> breez.Payment | None:
+    ) -> list[breez.Payment]:
+        """Collect every matching SDK record for the hash across all pages.
+
+        A payment hash is not unique across send attempts: retrying an invoice
+        with a fresh idempotency key leaves one record per attempt, so the
+        newest record may shadow a completed or live older one.
+        """
         sdk = await self._ensure_sdk()
         try:
             await sdk.sync_wallet(breez.SyncWalletRequest())
+            matches = []
             offset = 0
             while True:
                 response = await sdk.list_payments(
@@ -208,7 +214,6 @@ class SparkBackend(HoldInvoiceBackend):
                     if (
                         isinstance(details, breez.PaymentDetails.LIGHTNING)
                         and details.htlc_details.payment_hash == payment_hash
-                        and (payment_id is None or payment.id == payment_id)
                     ):
                         if payment.payment_type != direction:
                             raise BackendError(
@@ -216,9 +221,9 @@ class SparkBackend(HoldInvoiceBackend):
                             )
                         if invoice_details(details.invoice)[0] != payment_hash:
                             raise BackendError("Spark payment invoice/hash mismatch")
-                        return payment
+                        matches.append(payment)
                 if len(response.payments) < 100:
-                    return None
+                    return matches
                 offset += len(response.payments)
         except BackendError:
             raise
@@ -226,6 +231,33 @@ class SparkBackend(HoldInvoiceBackend):
             raise BackendError(
                 "Spark payment lookup failed; retry to reconcile"
             ) from None
+
+    async def _find_payment(
+        self,
+        payment_hash: str,
+        direction: breez.PaymentType,
+    ) -> breez.Payment | None:
+        matches = await self._find_payments(payment_hash, direction)
+        return matches[0] if matches else None
+
+    def _send_outcome(
+        self, attempts: list[breez.Payment], payment_hash: str
+    ) -> Payment:
+        """Reconcile all send attempts for one hash.
+
+        A valid completed attempt with a matching preimage wins; otherwise any
+        live attempt means pending; failed is reported only when every matching
+        attempt is definitively failed. Each candidate is validated before its
+        status is accepted.
+        """
+        pending: Payment | None = None
+        for attempt in attempts:
+            result = self._payment(attempt, payment_hash)
+            if result.state == PaymentState.succeeded:
+                return result
+            if result.state == PaymentState.pending:
+                pending = result
+        return pending if pending is not None else Payment(PaymentState.failed)
 
     async def create_funding_invoice(
         self, amount: int, expiry: int = 3600
@@ -558,26 +590,38 @@ class SparkBackend(HoldInvoiceBackend):
                 ).fetchone()
             if row is not None and row["state"] == PaymentState.succeeded.value:
                 return Payment(PaymentState.succeeded, row["preimage"], row["fee_msat"])
-            payment = await self._find_payment(
-                payment_hash,
-                breez.PaymentType.SEND,
-                row["idempotency_key"] if row is not None else None,
-            )
-            if payment is not None:
-                return self._save_payment(
-                    payment_hash, self._payment(payment, payment_hash)
-                )
+            attempts = await self._find_payments(payment_hash, breez.PaymentType.SEND)
+            if attempts:
+                outcome = self._send_outcome(attempts, payment_hash)
+                if outcome.state != PaymentState.failed:
+                    return self._save_payment(payment_hash, outcome)
             if row is None:
-                return None
+                return Payment(PaymentState.failed) if attempts else None
             if row["state"] == PaymentState.failed.value:
                 return Payment(PaymentState.failed)
-            # Reuse the durable SDK transfer UUID even if the original call died
-            # before the SDK wrote its payment cache. Provider retries are idempotent.
+            if attempts and row["idempotency_key"] in {
+                attempt.id for attempt in attempts
+            }:
+                # Every matching attempt, including the stored one, failed.
+                return self._save_payment(payment_hash, Payment(PaymentState.failed))
+            # The stored attempt is missing from the SDK cache, so the cached
+            # records cannot prove its outcome. Reuse the durable SDK transfer
+            # UUID even if the original call died before the SDK wrote its
+            # payment cache. Provider retries are idempotent.
             return await self._send(row)
 
     async def pay_invoice(
-        self, request: str, fee_limit_sat: int | None = None
+        self,
+        request: str,
+        fee_limit_sat: int | None = None,
+        *,
+        cltv_limit: int | None = None,
+        idempotency_key: str | None = None,
     ) -> Payment:
+        # Spark backing is timestamp-based; a route CLTV limit is validated
+        # for interface compatibility but does not constrain the send.
+        if cltv_limit is not None and (type(cltv_limit) is not int or cltv_limit < 0):
+            raise ValueError("CLTV limit must be nonnegative blocks")
         payment_hash, _ = invoice_details(request)
         async with self._payment_lock:
             with self.db.read() as conn:
@@ -591,20 +635,17 @@ class SparkBackend(HoldInvoiceBackend):
                     return Payment(
                         PaymentState.succeeded, row["preimage"], row["fee_msat"]
                     )
-            previous = await self._find_payment(
-                payment_hash,
-                breez.PaymentType.SEND,
-                row["idempotency_key"] if row is not None else None,
-            )
-            if previous is not None:
-                result = self._payment(previous, payment_hash)
+            attempts = await self._find_payments(payment_hash, breez.PaymentType.SEND)
+            if attempts:
+                result = self._send_outcome(attempts, payment_hash)
                 if result.state != PaymentState.failed:
                     return self._save_payment(payment_hash, result)
             if (
                 row is not None
                 and row["state"] != PaymentState.failed.value
-                and previous is None
+                and row["idempotency_key"] not in {attempt.id for attempt in attempts}
             ):
+                # The stored attempt is not cached; only it may resume its send.
                 return await self._send(row)
             decoded = decode(request)
             if decoded.date + decoded.expiry <= int(time.time()):
@@ -616,6 +657,15 @@ class SparkBackend(HoldInvoiceBackend):
             )
             if limit < 0:
                 raise ValueError("Spark fee limit must not be negative")
+            # A supplied key is validated and used only for a new payments row;
+            # existing rows always keep their stored transfer UUID.
+            if idempotency_key is None:
+                idempotency_key = str(uuid4())
+            else:
+                try:
+                    idempotency_key = str(UUID(idempotency_key))
+                except ValueError:
+                    raise ValueError("Spark idempotency key must be a UUID") from None
             sdk = await self._ensure_sdk()
             try:
                 prepared = await sdk.prepare_send_payment(
@@ -640,7 +690,7 @@ class SparkBackend(HoldInvoiceBackend):
                         payment_hash,
                         request,
                         limit,
-                        str(uuid4()),
+                        idempotency_key,
                         PaymentState.pending.value,
                         quoted_fee,
                     ),

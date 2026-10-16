@@ -1,3 +1,5 @@
+import fcntl
+import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -53,3 +55,34 @@ class BackendError(Exception):
 
 class IncompatibleMintDatabase(ValueError):
     pass
+
+
+class MintDatabaseInUse(RuntimeError):
+    pass
+
+
+_singleton_locks: dict[Path, int] = {}
+
+
+def acquire_singleton_lock(path: Path) -> bool:
+    """Hold an exclusive flock next to the mint database for process lifetime.
+
+    One mint process per database: a second OS process fails closed instead of
+    inheriting orphaned melt executor locks. Reentrant per canonical path so
+    tests and embedders can reopen a mint inside the same process. Returns
+    True only for this process's first acquisition of the database.
+    """
+    key = path.resolve()
+    if key in _singleton_locks:
+        return False
+    key.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(key.with_name(key.name + ".lock"), os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        raise MintDatabaseInUse(
+            "mint database is already in use by another mint process"
+        ) from None
+    _singleton_locks[key] = fd
+    return True

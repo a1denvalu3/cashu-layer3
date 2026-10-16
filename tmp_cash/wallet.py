@@ -243,6 +243,15 @@ class Wallet:
         try:
             response = client.finish_melt(operation)
         except ClientError as exc:
+            if (
+                exc.status_code == 410
+                and exc.detail == "melt payment failed; backing has expired"
+            ):
+                # Terminal: the backing was settled or expired before the
+                # payout failed, so the inputs must never be reused. The mint
+                # keeps the wire nullifiers UNSPENT; expire them locally.
+                self._expire_operation(operation_id)
+                raise
             if exc.status_code == 409 and exc.detail in {
                 "melt payment failed; tokens are unspent",
                 "melt quote already belongs to another request",
@@ -250,6 +259,7 @@ class Wallet:
                 "melt quote has expired",
                 "backing HTLC is closed; its tokens have expired",
                 "backing HTLC redemption deadline has passed",
+                "backing HTLC is too close to its settlement cutoff for a new melt",
             }:
                 nullifiers = [Client.nullifier(p) for p in operation.token.proofs]
                 try:
@@ -279,6 +289,26 @@ class Wallet:
         if client.check(nullifiers).states != ["UNSPENT"] * len(nullifiers):
             raise ValueError("mint has spent or reserved an input; retry the operation")
         self._release_operation(operation_id, require_unsubmitted=True)
+
+    def _expire_operation(self, operation_id: str):
+        """Clear a terminally failed melt and mark its inputs locally expired."""
+        with self.db.transaction() as conn:
+            operation = conn.execute(
+                "SELECT kind FROM operations WHERE id=?", (operation_id,)
+            ).fetchone()
+            if operation is None:
+                raise ValueError("unknown pending operation")
+            if operation["kind"] != "melt":
+                raise ValueError("only melt operations can expire terminally")
+            for source in conn.execute(
+                "SELECT source,original_state FROM operation_sources WHERE operation=?",
+                (operation_id,),
+            ).fetchall():
+                conn.execute(
+                    "UPDATE tokens SET state='EXPIRED',expired_state=? WHERE id=? AND state='PENDING'",
+                    (source["original_state"] or "LIVE", source["source"]),
+                )
+            conn.execute("DELETE FROM operations WHERE id=?", (operation_id,))
 
     def _release_operation(self, operation_id: str, require_unsubmitted: bool = False):
         with self.db.transaction() as conn:

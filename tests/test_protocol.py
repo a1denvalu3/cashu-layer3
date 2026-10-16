@@ -333,7 +333,7 @@ def test_definite_failed_pending_melt_releases_inputs_without_another_send(
     operation = service.client.prepare_melt(token, invoice, fee_reserve=0)
     sends = []
 
-    async def pending(request, fee_limit_sat=None):
+    async def pending(request, fee_limit_sat=None, **kwargs):
         sends.append(request)
         return Payment(PaymentState.pending)
 

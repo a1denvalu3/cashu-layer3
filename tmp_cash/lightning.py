@@ -74,7 +74,12 @@ class HoldInvoiceBackend(ABC):
 
     @abstractmethod
     async def pay_invoice(
-        self, request: str, fee_limit_sat: int | None = None
+        self,
+        request: str,
+        fee_limit_sat: int | None = None,
+        *,
+        cltv_limit: int | None = None,
+        idempotency_key: str | None = None,
     ) -> Payment: ...
 
     @abstractmethod
@@ -288,7 +293,12 @@ class FakeBackend(HoldInvoiceBackend):
             )
 
     async def pay_invoice(
-        self, request: str, fee_limit_sat: int | None = None
+        self,
+        request: str,
+        fee_limit_sat: int | None = None,
+        *,
+        cltv_limit: int | None = None,
+        idempotency_key: str | None = None,
     ) -> Payment:
         payment_hash, _ = invoice_details(request)
         with self.db.transaction() as conn:
@@ -392,10 +402,7 @@ class LndPayment(BaseModel):
     fee_msat: int = Field(default=0, ge=0)
 
 
-class LndPayments(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    payments: list[LndPayment] = []
-    last_index_offset: str = "0"
+GRPC_NOT_FOUND = 5
 
 
 class LndStreamError(BaseModel):
@@ -427,6 +434,7 @@ class LndRestBackend(HoldInvoiceBackend):
         transport: httpx.AsyncBaseTransport | None = None,
         hold_expiry_delta: int = 18,
         cltv_expiry: int = 0,
+        stream_timeout: float = 90,
     ):
         if not endpoint.startswith("https://"):
             raise ValueError("LND REST endpoint must use https")
@@ -436,10 +444,13 @@ class LndRestBackend(HoldInvoiceBackend):
             raise ValueError("hold expiry delta must not be negative")
         if type(cltv_expiry) is not int or not 0 <= cltv_expiry <= 65535:
             raise ValueError("LND final CLTV delta must be between 0 and 65535 blocks")
+        if stream_timeout <= 0:
+            raise ValueError("stream timeout must be positive")
         tls = ssl.create_default_context(cafile=str(cert_path) if cert_path else None)
         self.fee_limit_sat = fee_limit_sat
         self.hold_expiry_delta = hold_expiry_delta
         self.cltv_expiry = cltv_expiry
+        self.stream_timeout = stream_timeout
         self.client = httpx.AsyncClient(
             base_url=endpoint.rstrip("/"),
             headers={"Grpc-Metadata-macaroon": macaroon_path.read_bytes().hex()},
@@ -593,97 +604,149 @@ class LndRestBackend(HoldInvoiceBackend):
             {"preimage": base64.b64encode(preimage).decode()},
         )
 
+    def _stream_http_timeout(self) -> httpx.Timeout:
+        # Keep per-read timeouts safely above the total stream deadline so a
+        # quiet stream is ended by the deadline, not by httpx, preserving the
+        # last seen state on the track side.
+        return httpx.Timeout(self.stream_timeout + 30, connect=10)
+
+    @staticmethod
+    def _validated_payment(payment: LndPayment, payment_hash: str) -> Payment:
+        """Map a tracked LND payment to a state, rejecting inconsistent data."""
+        if payment.payment_hash != payment_hash:
+            raise BackendError("LND tracked the wrong payment")
+        if payment.status in ("INITIATED", "IN_FLIGHT"):
+            return Payment(PaymentState.pending)
+        if payment.status == "SUCCEEDED":
+            try:
+                preimage = bytes.fromhex(payment.payment_preimage)
+            except ValueError:
+                raise BackendError(
+                    "LND payment tracking returned an invalid preimage"
+                ) from None
+            if (
+                len(preimage) != 32
+                or hashlib.sha256(preimage).hexdigest() != payment_hash
+            ):
+                raise BackendError("LND payment tracking returned an invalid preimage")
+            return Payment(PaymentState.succeeded, preimage, payment.fee_msat)
+        if payment.status == "FAILED":
+            return Payment(PaymentState.failed)
+        raise BackendError("LND returned an unknown payment status")
+
     async def pay_invoice(
-        self, request: str, fee_limit_sat: int | None = None
+        self,
+        request: str,
+        fee_limit_sat: int | None = None,
+        *,
+        cltv_limit: int | None = None,
+        idempotency_key: str | None = None,
     ) -> Payment:
+        # LND needs no idempotency key: payments deduplicate by payment hash
+        # and TrackPaymentV2 always reflects the current attempt state.
+        if cltv_limit is not None and (type(cltv_limit) is not int or cltv_limit < 0):
+            raise ValueError("CLTV limit must be nonnegative blocks")
         payment_hash, _ = invoice_details(request)
         previous = await self.get_payment(payment_hash)
         if previous is not None and previous.state != PaymentState.failed:
             return previous
         # SendPaymentSync was removed in LND 0.21. SendPaymentV2 returns a
         # stream of JSON envelopes; request only the final state.
+        body = {
+            "payment_request": request,
+            "fee_limit_sat": str(
+                self.fee_limit_sat
+                if fee_limit_sat is None
+                else min(fee_limit_sat, self.fee_limit_sat)
+            ),
+            "timeout_seconds": 60,
+            "no_inflight_updates": True,
+        }
+        if cltv_limit is not None:
+            # Bound the outgoing HTLC so routes that cannot resolve inside the
+            # remaining backing-settlement window are refused.
+            body["cltv_limit"] = str(cltv_limit)
+        deadline = time.monotonic() + self.stream_timeout
         try:
             async with self.client.stream(
                 "POST",
                 "/v2/router/send",
-                json={
-                    "payment_request": request,
-                    "fee_limit_sat": str(
-                        self.fee_limit_sat
-                        if fee_limit_sat is None
-                        else min(fee_limit_sat, self.fee_limit_sat)
-                    ),
-                    "timeout_seconds": 60,
-                    "no_inflight_updates": True,
-                },
+                json=body,
+                timeout=self._stream_http_timeout(),
             ) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
+                    if time.monotonic() >= deadline:
+                        raise BackendError("LND payout timed out; retry to reconcile")
                     if not line:
                         continue
                     update = LndPaymentUpdate.model_validate_json(line)
                     if update.error is not None:
-                        # Errors can accompany duplicate attempts. Reconcile the
-                        # tracked payment instead of refunding an uncertain payout.
+                        # Errors can accompany duplicate attempts. Only a tracked
+                        # success or pending state is conclusive here: a tracked
+                        # failure may predate this send, and a missing record is
+                        # ambiguous while the send may still be in flight.
                         tracked = await self.get_payment(payment_hash)
-                        if tracked is not None:
+                        if tracked is not None and tracked.state != PaymentState.failed:
                             return tracked
                         raise BackendError("LND rejected payout; retry to reconcile")
                     if update.result is not None:
-                        payment = update.result
-                        if payment.payment_hash != payment_hash:
-                            raise BackendError("LND streamed the wrong payment")
-                        if payment.status == "FAILED":
-                            return Payment(PaymentState.failed)
-                        if payment.status == "SUCCEEDED":
-                            preimage = bytes.fromhex(payment.payment_preimage)
-                            if (
-                                len(preimage) != 32
-                                or hashlib.sha256(preimage).hexdigest() != payment_hash
-                            ):
-                                raise BackendError(
-                                    "LND returned an invalid payout preimage"
-                                )
-                            return Payment(
-                                PaymentState.succeeded, preimage, payment.fee_msat
-                            )
+                        payment = self._validated_payment(update.result, payment_hash)
+                        if payment.state != PaymentState.pending:
+                            return payment
+        except BackendError:
+            raise
         except (httpx.HTTPError, ValueError) as exc:
             raise BackendError("LND payout interrupted; retry to reconcile") from exc
         return Payment(PaymentState.pending)
 
     async def get_payment(self, payment_hash: str) -> Payment | None:
-        offset = "0"
-        while True:
-            body = await self._call(
+        # TrackPaymentV2 reports the current state of the payment for this hash,
+        # unlike the historical ListPayments scan where a stale FAILED record
+        # could shadow a newer attempt.
+        encoded = base64.urlsafe_b64encode(bytes.fromhex(payment_hash)).decode()
+        deadline = time.monotonic() + self.stream_timeout
+        latest: Payment | None = None
+        try:
+            async with self.client.stream(
                 "GET",
-                "/v1/payments",
-                params={
-                    "include_incomplete": "true",
-                    "max_payments": "1000",
-                    "index_offset": offset,
-                },
-            )
-            page = LndPayments.model_validate(body)
-            for payment in page.payments:
-                if payment.payment_hash == payment_hash:
-                    if payment.status == "SUCCEEDED":
-                        preimage = bytes.fromhex(payment.payment_preimage)
-                        if (
-                            len(preimage) != 32
-                            or hashlib.sha256(preimage).hexdigest() != payment_hash
-                        ):
-                            raise BackendError(
-                                "LND payment tracking returned an invalid preimage"
-                            )
-                        return Payment(
-                            PaymentState.succeeded, preimage, payment.fee_msat
+                f"/v2/router/track/{encoded}",
+                timeout=self._stream_http_timeout(),
+            ) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if time.monotonic() >= deadline:
+                        # An inconclusive track reports only what was already seen.
+                        return latest
+                    if not line:
+                        continue
+                    update = LndPaymentUpdate.model_validate_json(line)
+                    if update.error is not None:
+                        if update.error.code == GRPC_NOT_FOUND:
+                            return None
+                        raise BackendError(
+                            "LND payment tracking failed; retry to reconcile"
                         )
-                    if payment.status == "FAILED":
-                        return Payment(PaymentState.failed)
-                    return Payment(PaymentState.pending)
-            if not page.payments or page.last_index_offset == offset:
+                    if update.result is not None:
+                        latest = self._validated_payment(update.result, payment_hash)
+                        if latest.state != PaymentState.pending:
+                            return latest
+        except BackendError:
+            raise
+        except httpx.ReadTimeout:
+            # A quiet stream hit the read timeout; report only what was seen.
+            return latest
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
                 return None
-            offset = page.last_index_offset
+            raise BackendError(
+                "LND payment tracking failed; retry to reconcile"
+            ) from exc
+        except (httpx.HTTPError, ValueError) as exc:
+            raise BackendError(
+                "LND payment tracking failed; retry to reconcile"
+            ) from exc
+        return latest
 
     async def close(self) -> None:
         await self.client.aclose()

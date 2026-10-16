@@ -7,7 +7,7 @@ import uvicorn
 from dotenv import dotenv_values
 
 from .api import create_app
-from .db import IncompatibleMintDatabase
+from .db import IncompatibleMintDatabase, MintDatabaseInUse
 from .lightning import FakeBackend, HoldInvoiceBackend, LndRestBackend
 from .mint import Mint
 
@@ -209,6 +209,12 @@ def main() -> None:
             args.settle_margin_blocks,
             args.settle_margin_seconds,
         )
+    except MintDatabaseInUse as exc:
+        raise SystemExit(
+            f"Cannot open {args.data / 'mint.sqlite3'}: {exc}.\n"
+            "Only one mint process may use this database; stop the other "
+            "mint process before starting this one."
+        ) from None
     except IncompatibleMintDatabase as exc:
         raise SystemExit(
             f"Cannot open {args.data / 'mint.sqlite3'}: {exc}.\n"

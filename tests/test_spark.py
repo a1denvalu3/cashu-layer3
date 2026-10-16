@@ -815,6 +815,134 @@ async def test_failed_attempt_retry_uses_new_uuid_and_ignores_old_failure(
     assert len(sdk.provider) == 2
 
 
+async def test_newer_failed_attempt_does_not_shadow_older_completed(spark):
+    backend, sdk = spark
+    request, payment_hash, preimage = receiver(sdk)
+    completed = sdk_payment(
+        request, breez.PaymentType.SEND, breez.PaymentStatus.COMPLETED, preimage
+    )
+    failed = sdk_payment(request, breez.PaymentType.SEND, breez.PaymentStatus.FAILED)
+    # Newest-first order plus paging: the failed record shadows the completed
+    # one across a page boundary.
+    sdk.payments = (
+        [failed] + [replace_dummy(completed) for _ in range(100)] + [completed]
+    )
+    payment = await backend.get_payment(payment_hash)
+    assert payment.state == PaymentState.succeeded
+    assert payment.preimage == preimage
+    assert sdk.pages == [0, 100]
+
+
+async def test_newer_failed_attempt_does_not_shadow_older_pending(spark):
+    backend, sdk = spark
+    request, payment_hash, _ = receiver(sdk)
+    pending = sdk_payment(request, breez.PaymentType.SEND, breez.PaymentStatus.PENDING)
+    failed = sdk_payment(request, breez.PaymentType.SEND, breez.PaymentStatus.FAILED)
+    sdk.payments = [failed, pending]
+    assert (await backend.get_payment(payment_hash)).state == PaymentState.pending
+
+
+async def test_all_failed_attempts_report_failed(spark):
+    backend, sdk = spark
+    request, payment_hash, _ = receiver(sdk)
+    sdk.payments = [
+        sdk_payment(request, breez.PaymentType.SEND, breez.PaymentStatus.FAILED)
+        for _ in range(2)
+    ]
+    assert (await backend.get_payment(payment_hash)).state == PaymentState.failed
+
+
+async def test_failed_stored_uuid_does_not_shadow_completed_attempt(spark):
+    backend, sdk = spark
+    request, payment_hash, preimage = receiver(sdk)
+    sdk.fail = True
+    assert (await backend.pay_invoice(request)).state == PaymentState.failed
+    sdk.fail = False
+    assert (await backend.pay_invoice(request)).state == PaymentState.succeeded
+    # A stale local receipt still points at the failed first attempt.
+    with backend.db.transaction() as conn:
+        conn.execute(
+            "UPDATE payments SET state='FAILED',preimage=NULL,fee_msat=0,"
+            "idempotency_key=?",
+            (sdk.sends[0][0],),
+        )
+    payment = await backend.get_payment(payment_hash)
+    assert payment.state == PaymentState.succeeded
+    assert payment.preimage == preimage
+    assert len(sdk.provider) == 2
+    assert len(sdk.sends) == 2  # recovery must not start another send
+
+
+async def test_missing_sdk_attempt_resumes_with_stored_idempotency_key(spark):
+    backend, sdk = spark
+    request, payment_hash, preimage = receiver(sdk)
+    sdk.fee = 1
+    result = await backend.pay_invoice(request, 2)
+    assert result.state == PaymentState.succeeded
+    # The SDK cache lost the attempt while the provider kept the transfer.
+    sdk.payments.clear()
+    sdk.fee = 9  # Resume must keep the original quote and transfer UUID.
+    with backend.db.transaction() as conn:
+        conn.execute("UPDATE payments SET state='IN_FLIGHT',preimage=NULL,fee_msat=0")
+    payment = await backend.get_payment(payment_hash)
+    assert payment.state == PaymentState.succeeded
+    assert payment.preimage == preimage
+    assert payment.fee_msat == 1000
+    assert len(sdk.provider) == 1
+    assert sdk.sends[0] == sdk.sends[1]
+
+
+async def test_supplied_idempotency_key_is_persisted_and_reused(spark):
+    backend, sdk = spark
+    request, payment_hash, preimage = receiver(sdk)
+    key = str(uuid4())
+    payment = await backend.pay_invoice(request, idempotency_key=key.upper())
+    assert payment.state == PaymentState.succeeded
+    with backend.db.read() as conn:
+        row = conn.execute("SELECT * FROM payments").fetchone()
+    assert row["idempotency_key"] == key  # validated and normalized
+    assert sdk.sends == [(key, 0)]
+    # A later resume must keep reusing the supplied transfer UUID.
+    sdk.payments.clear()
+    with backend.db.transaction() as conn:
+        conn.execute("UPDATE payments SET state='IN_FLIGHT',preimage=NULL,fee_msat=0")
+    recovered = await backend.get_payment(payment_hash)
+    assert recovered.state == PaymentState.succeeded
+    assert recovered.preimage == preimage
+    assert sdk.sends == [(key, 0), (key, 0)]
+    assert list(sdk.provider) == [key]
+
+
+async def test_stored_idempotency_key_wins_over_new_supplied_value(spark):
+    backend, sdk = spark
+    request, payment_hash, preimage = receiver(sdk)
+    stored = str(uuid4())
+    sdk.lose_response = True
+    sdk.lose_cache = True
+    with pytest.raises(BackendError, match="interrupted"):
+        await backend.pay_invoice(request, idempotency_key=stored)
+    sdk.lose_response = False
+    sdk.lose_cache = False
+    payment = await backend.pay_invoice(request, idempotency_key=str(uuid4()))
+    assert payment.state == PaymentState.succeeded
+    assert payment.preimage == preimage
+    assert {key for key, _ in sdk.sends} == {stored}
+    assert list(sdk.provider) == [stored]
+    with backend.db.read() as conn:
+        row = conn.execute("SELECT * FROM payments").fetchone()
+    assert row["idempotency_key"] == stored
+
+
+async def test_invalid_supplied_idempotency_key_is_rejected(spark):
+    backend, sdk = spark
+    request, _, _ = receiver(sdk)
+    with pytest.raises(ValueError, match="idempotency key must be a UUID"):
+        await backend.pay_invoice(request, idempotency_key="not-a-uuid")
+    assert sdk.sends == []
+    with backend.db.read() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM payments").fetchone()[0] == 0
+
+
 @pytest.mark.parametrize("mutation", ["bad_preimage", "wrong_hash", "negative_fee"])
 async def test_malformed_payout_does_not_release_reserved_melt(spark, mutation):
     backend, sdk = spark

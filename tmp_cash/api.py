@@ -32,6 +32,8 @@ from .models import (
     SwapRequest,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def create_app(
     mint: Mint,
@@ -45,8 +47,10 @@ def create_app(
         while True:
             try:
                 await mint.resume_pending_melts()
-            except BackendError:
-                pass
+            except Exception as exc:
+                # Log only the type; provider errors can carry secrets.
+                # Cancellation (BaseException) still propagates.
+                logger.warning("Recovery pass failed: %s", type(exc).__name__)
             await asyncio.sleep(5)
 
     @asynccontextmanager
@@ -188,7 +192,7 @@ def create_app(
 
     @app.post("/v1/checkstate", response_model=CheckResponse)
     async def check(request: CheckRequest):
-        return mint.check(request.nullifiers)
+        return await mint.check(request.nullifiers)
 
     @app.post("/v1/melt/quote/bolt11", response_model=MeltQuoteResponse)
     async def melt_quote(request: MeltQuoteRequest):

@@ -121,6 +121,15 @@ environment variables override the file and CLI arguments override both. Run
 one server process per database and retain its seed across restarts. The mint
 needs outgoing liquidity for payments while its incoming holds remain pending.
 
+Exactly **one mint process** may use a database: at startup the mint takes an
+exclusive `flock` on `mint.sqlite3.lock` next to the database and keeps it for
+the process lifetime. A second process fails immediately with "database is
+already in use by another mint process"; stop the other mint instead of
+pointing it at a new database. Single-process ownership is what allows the
+mint to clear orphaned melt executor locks when it first acquires the
+database; reopening the same database inside a running process never clears
+live locks.
+
 New LND funding invoices request a redeemable lifetime of **2,016 blocks** by
 default, approximately two weeks at Bitcoin's average block interval. Configure
 it with `TMP_CASH_LND_TOKEN_LIFETIME_BLOCKS` in `.env` or
@@ -467,6 +476,34 @@ value are stored atomically **before** full-consumption settlement. A response
 lost after payout is recovered from Lightning's tracked payment without paying
 again. Exact retries return the original signatures and receipt.
 
+Each melt outbox has a durable payment **attempt** and an execution lock, armed
+in the same transaction as the reservation (the Nutshell PR #8 model). While an
+executor owns the attempt, status pollers and the recovery worker only see a
+pending melt: they never consult backend status, release inputs or pay again.
+The first send is marked `submitted` atomically beforehand; a Spark send uses an
+attempt-derived `uuid5` idempotency key, so a recovered outbox resumes the same
+send instead of starting a new one. An explicit pending outcome unlocks the
+outbox for later reconciliation, and a backend error before the first
+submission unlocks it for a later retry. A transport or backend error **after**
+submission is uncertain: the outbox fails closed with its lock held rather than
+letting another poller consume a stale failure record while the real payment
+may still resolve. A restart clears such orphaned executor locks (only on the
+process's first acquisition of the database), after which recovery reconciles
+the tracked payment only; it never sends again. If the backend no longer has
+any record of the payment, the outbox stays pending and its inputs stay
+reserved — restart alone does not resolve it, so reconcile the node manually
+before considering the inputs lost.
+
+New melts are refused once any involved backing is within **one settlement
+margin of its redemption cutoff** (twice the margin before the hold expiry
+itself), before anything is reserved. For LND, the mint also passes a
+remaining-block `cltv_limit` to SendPaymentV2 so routes that cannot resolve
+before the earliest backing cutoff are refused. Once a payment is submitted,
+recovery remains responsible for its outcome and is not blocked by this
+lockout. This shrinks the late-resolution window but cannot atomically
+guarantee that an external Lightning HTLC resolves before an independent
+backing HTLC; that boundary is inherent to the protocol.
+
 A definite payout failure releases all inputs and is retained as a terminal
 failure for that quote. Replaying that request never starts another payment;
 a new quote is required to authorize another attempt. An uncertain or pending
@@ -484,6 +521,22 @@ Already authorized payments may still resolve after the cutoff. Recovery
 continues to reconcile those payments, but creates no claim against a closed
 HTLC. Such change is reported as `expired_change`, rather than a user balance
 or newly spendable token. New melts against closed claims are rejected.
+
+If a definite failure arrives only after an involved backing was settled or
+expired, the failure is **terminal**: the reservation is released, the quote is
+retained with `expired`, and the mint returns HTTP 410 ("melt payment failed;
+backing has expired"). The credentials are never presented as newly reusable:
+their wire nullifiers stay `UNSPENT` (no signature was issued), but server-side
+backing checks prevent redemption. The Python wallet clears the pending
+operation and marks its inputs locally `EXPIRED`; on a later refresh, inputs
+whose backing is still live (a mixed-HTLC melt) revive to their original state,
+while inputs whose backing closed stay expired. This is not a post-settlement
+refund; no user balance is created.
+
+Payout invoices with an expiry more than **24 hours** in the future are
+rejected at quote time. Expired melt quotes with no melt and no failed
+tombstone are pruned at most every five minutes; every quote needed for
+pending, paid, failed or exact-retry recovery is retained.
 
 ## Cryptography
 
@@ -555,6 +608,14 @@ concurrent identical requests share successful work. Errors and pending melts
 are not cached. Quotes and state queries always reach the mint. The cache is an
 optimization; durable database recovery still handles retries after eviction,
 expiry or restart.
+
+Expensive synchronous validation and signing (mint issuance, swaps, checkstate,
+melt proofs and paid-melt signing) runs through a bounded admission of four
+concurrent operations with a half-second admission timeout, returning 503 when
+busy instead of queueing unbounded work. Deployments behind Nginx should also
+apply per-IP rate limiting (for example 10 r/s, burst 60, HTTP 429) to API
+locations; the application-level bounds remain authoritative for non-Nginx
+deployments.
 
 Batches allow up to 256 inputs or outputs; melt change commitments also have a
 256-slot limit. For very large mixed-HTLC batches, use smaller payments or select
