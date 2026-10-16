@@ -37,6 +37,7 @@ const proof = z
     state: z.enum(["ready", "pending", "reserved", "sent", "spent", "expired"]),
     operationId: hex32.nullable(),
     createdAt: date,
+    expiredAt: date.optional(),
   })
   .strict();
 const operation = z

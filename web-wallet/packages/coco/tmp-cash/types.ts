@@ -20,6 +20,8 @@ export interface TmpCashProofRecord {
   state: TmpCashProofState;
   operationId: string | null;
   createdAt: number;
+  /** When this wallet first observed expiry, not the backing's exact close time. */
+  expiredAt?: number;
 }
 export interface TmpCashFunding {
   id: string;

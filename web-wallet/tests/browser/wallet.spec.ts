@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { psInvoiceDetails } from "@cashu/cashu-ts/tmp-cash";
+import { psInvoiceDetails, type PSSnapshot } from "@cashu/cashu-ts/tmp-cash";
 import { readFile } from "node:fs/promises";
 
 const mintUrl = "http://127.0.0.1:3339";
@@ -92,6 +92,9 @@ test("opens with a malformed saved preference and preserves funds when reconnect
   await expect(page.getByTestId("balance")).toHaveText("100sats");
 });
 async function fund(page: Page, value: number) {
+  const balance = Number(
+    (await page.getByTestId("balance").innerText()).replace(/\D/g, ""),
+  );
   await page.getByRole("button", { name: "Add sats", exact: true }).click();
   await page.getByLabel("Amount in sats").fill(String(value));
   await page.getByRole("button", { name: "Create funding invoice" }).click();
@@ -108,9 +111,157 @@ async function fund(page: Page, value: number) {
     page.getByText(`${value} sats received`, { exact: true }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Back to wallet" }).click();
-  await expect(page.getByTestId("balance")).toContainText(String(value));
+  await expect(page.getByTestId("balance")).toHaveText(
+    `${(balance + value).toLocaleString("en-US")}sats`,
+  );
   return hash;
 }
+
+for (const deadline of ["time", "block"] as const) {
+  test(`keeps ${deadline}-expired backings and activity visible across reload and offline, then clears a false expiry`, async ({
+    page,
+  }) => {
+    await page.goto("/wallet/");
+    await expect(
+      page.getByText("Mint connected", { exact: true }),
+    ).toBeVisible();
+    const hash = await fund(page, 100);
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await page.getByLabel("Amount in sats").fill("10");
+    await page.getByRole("button", { name: "Create token" }).click();
+    await expect(page.getByLabel("Outgoing token")).toHaveValue(/^cashuPS/);
+    await page.getByRole("button", { name: "Close dialog" }).click();
+    await fund(page, 32);
+
+    await page.route(mintUrl + "/v1/htlcs/check", async (route) => {
+      const response = await route.fetch();
+      const snapshot: PSSnapshot = await response.json();
+      if (deadline === "block") snapshot.block_height = 1000;
+      for (const backing of snapshot.htlcs) {
+        if (deadline === "time") {
+          if (backing.payment_hash === hash)
+            backing.melt_deadline = snapshot.checked_at - 1;
+        } else {
+          backing.melt_deadline_height =
+            backing.payment_hash === hash ? 1000 : 1100;
+          backing.expiry_height = backing.melt_deadline_height + 6;
+          backing.htlc_expiry_height = backing.expiry_height;
+          backing.blocks_remaining =
+            backing.expiry_height - snapshot.block_height!;
+        }
+      }
+      await route.fulfill({ response, json: snapshot });
+    });
+    await page.getByRole("button", { name: "Refresh backing status" }).click();
+    await expect(page.getByTestId("balance")).toHaveText("32sats");
+    await expect(
+      page.getByRole("heading", { name: "Your backings 1" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Expired backings 1" }),
+    ).toBeVisible();
+    const card = page.locator(".backing.expired");
+    await expect(card).toHaveCount(1);
+    await expect(card.locator(".backing-amount")).toHaveText("90 sats");
+    await expect(card).toContainText("Also 10 sats in shared tokens.");
+    await expect(card.getByRole("button")).toHaveCount(0);
+    const observed = await card.getByText(/^Observed /).textContent();
+    await page.getByRole("button", { name: "Refresh backing status" }).click();
+    await page.reload();
+    await expect(
+      page.getByText("Mint connected", { exact: true }),
+    ).toBeVisible();
+    await expect(card.getByText(/^Observed /)).toHaveText(observed!);
+    await page.getByRole("button", { name: "Activity", exact: true }).click();
+    const expiry = page
+      .locator(".activity-row")
+      .filter({ hasText: "Backing expired" });
+    await expect(expiry).toHaveCount(1);
+    await expect(expiry.locator(".activity-amount")).toHaveText("−90");
+    await expect(expiry).toContainText("10 sats in shared tokens.");
+
+    if (deadline === "time") {
+      for (const width of [320, 1440]) {
+        await page.setViewportSize({ width, height: 900 });
+        for (const colorScheme of ["light", "dark"] as const) {
+          await page.emulateMedia({ colorScheme });
+          for (const tab of ["Wallet", "Activity"]) {
+            await page.getByRole("button", { name: tab, exact: true }).click();
+            const contained = await page
+              .locator(
+                ".backing.expired, .activity-row, .activity-name, .activity-value",
+              )
+              .evaluateAll((elements) =>
+                elements.every((element) => {
+                  const bounds = element.getBoundingClientRect();
+                  return (
+                    bounds.left >= 0 &&
+                    bounds.right <= document.documentElement.clientWidth + 1 &&
+                    element.scrollWidth <= element.clientWidth + 1
+                  );
+                }),
+              );
+            expect(contained).toBe(true);
+          }
+        }
+      }
+      await page.getByRole("button", { name: "Wallet", exact: true }).click();
+      await page.screenshot({
+        path: "test-results/wallet-expired-backings.png",
+        fullPage: true,
+        animations: "disabled",
+      });
+    }
+
+    await page.route(mintUrl + "/**", (route) => route.abort("failed"));
+    await page.reload();
+    await expect(page.getByText("Mint offline", { exact: true })).toBeVisible();
+    await expect(card.getByText(/^Observed /)).toHaveText(observed!);
+    await expect(
+      page.getByText("A little cash. A little freedom."),
+    ).toHaveCount(0);
+    await page.getByRole("button", { name: "Activity", exact: true }).click();
+    await expect(expiry).toHaveCount(1);
+
+    // The actual backing is live: a successful recheck must remove false history.
+    await page.unrouteAll({ behavior: "wait" });
+    await page.reload();
+    await expect(page.getByTestId("balance")).toHaveText("122sats");
+    await expect(card).toHaveCount(0);
+    await page.getByRole("button", { name: "Activity", exact: true }).click();
+    await expect(expiry).toHaveCount(0);
+  });
+}
+
+test("records expiry of fully shared tokens without counting another balance loss", async ({
+  page,
+}) => {
+  await page.goto("/wallet/");
+  await expect(page.getByText("Mint connected", { exact: true })).toBeVisible();
+  const hash = await fund(page, 32);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await page.getByLabel("Amount in sats").fill("32");
+  await page.getByRole("button", { name: "Create token" }).click();
+  await expect(page.getByLabel("Outgoing token")).toHaveValue(/^cashuPS/);
+  await page.getByRole("button", { name: "Close dialog" }).click();
+  await page.request.post(mintUrl + "/test/settle", {
+    data: { payment_hash: hash },
+  });
+  await page.getByRole("button", { name: "Refresh backing status" }).click();
+  await expect(page.getByTestId("balance")).toHaveText("0sats");
+  await expect(page.locator(".backing.expired .backing-amount")).toHaveText(
+    "32 sats shared",
+  );
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  const expiry = page
+    .locator(".activity-row")
+    .filter({ hasText: "Backing expired" });
+  await expect(expiry).toHaveCount(1);
+  await expect(expiry.locator(".activity-amount")).toHaveText("32");
+  await expect(expiry.locator(".activity-value")).toContainText(
+    "Shared tokens",
+  );
+});
 
 test("discards a quote when the invoice changes during its request", async ({
   page,

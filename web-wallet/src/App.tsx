@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -48,6 +49,7 @@ import {
 import { decryptBackup, encryptBackup, MAX_BACKUP_LENGTH } from "./backup";
 import { useTheme } from "./theme";
 import { TmpCashMark } from "./TmpCashMark";
+import { expiredBackings, type ExpiredBacking } from "./backings";
 import { InvoiceScanner } from "./InvoiceScanner";
 
 const repo = new TmpCashIndexedDbRepository();
@@ -90,7 +92,25 @@ const purposeNames = {
   send: "Sent ecash",
   receive: "Received ecash",
   melt: "Lightning payment",
+  expire: "Backing expired",
 };
+type ExpiryActivity = ExpiredBacking & {
+  id: string;
+  purpose: "expire";
+  createdAt: number | null;
+};
+type WalletActivity = TmpCashActivity | ExpiryActivity;
+
+function observedLabel(timestamp: number | null): string {
+  return timestamp === null
+    ? "Observation time unavailable"
+    : `Observed ${new Date(timestamp).toLocaleString([], {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })}`;
+}
 
 function deadlineLabel(
   timestamp: number | null,
@@ -213,15 +233,21 @@ function ActivityRow({
   row,
   showToken,
 }: {
-  row: TmpCashActivity;
+  row: WalletActivity;
   showToken: (value: string) => void;
 }) {
   const incoming = row.purpose === "mint" || row.purpose === "receive";
-  const amount = `${incoming ? "+" : "−"}${format(row.amount)}`;
+  const expiry = row.purpose === "expire" ? row : null;
+  const sharedOnly = expiry !== null && row.amount === 0;
+  const amount = `${incoming ? "+" : sharedOnly ? "" : "−"}${format(sharedOnly ? expiry.sharedAmount : row.amount)}`;
   return (
     <div className="activity-row">
-      <span className={`transaction-icon ${incoming ? "incoming" : ""}`}>
-        {row.purpose === "melt" ? (
+      <span
+        className={`transaction-icon ${expiry ? "expired" : incoming ? "incoming" : ""}`}
+      >
+        {expiry ? (
+          <Clock3 size={19} />
+        ) : row.purpose === "melt" ? (
           <Zap size={19} />
         ) : incoming ? (
           <ArrowDownLeft size={20} />
@@ -232,16 +258,28 @@ function ActivityRow({
       <div className="activity-name">
         <strong>{purposeNames[row.purpose]}</strong>
         <span className="small muted">
-          {new Date(row.createdAt).toLocaleString([], {
-            month: "short",
-            day: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-          {row.receipt ? ` · ${format(row.receipt.fee)} sat fee` : ""}
+          {expiry
+            ? `${observedLabel(expiry.createdAt)} · ${short(expiry.hash)}`
+            : new Date(row.createdAt!).toLocaleString([], {
+                month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+          {"receipt" in row && row.receipt
+            ? ` · ${format(row.receipt.fee)} sat fee`
+            : ""}
         </span>
+        {expiry && (
+          <span className="small muted">
+            Backing settled or its deadline passed.
+            {expiry.sharedAmount > 0
+              ? ` ${format(expiry.sharedAmount)} sats in shared tokens.`
+              : ""}
+          </span>
+        )}
       </div>
-      {row.token && (
+      {"token" in row && row.token && (
         <button
           className="text-button small"
           onClick={() => showToken(row.token!)}
@@ -257,7 +295,13 @@ function ActivityRow({
           <span className="small muted">sats</span>
         </strong>
         <span className="small muted">
-          {row.state === "sent" ? "Shared token" : "Completed"}
+          {expiry
+            ? sharedOnly
+              ? "Shared tokens"
+              : "Expired"
+            : "state" in row && row.state === "sent"
+              ? "Shared token"
+              : "Completed"}
         </span>
       </div>
     </div>
@@ -456,9 +500,21 @@ export function App() {
       setError(err instanceof Error ? err.message : "Invalid URL");
     }
   }
-  const localActivity = (view?.activity ?? [])
-    .filter((a) => a.mint === mintUrl)
-    .sort((a, b) => b.createdAt - a.createdAt);
+  const closedBackings = useMemo(
+    () => expiredBackings(view?.proofs ?? [], view?.activity ?? [], mintUrl),
+    [view?.proofs, view?.activity, mintUrl],
+  );
+  const localActivity: WalletActivity[] = [
+    ...(view?.activity ?? []).filter((a) => a.mint === mintUrl),
+    ...closedBackings.map(
+      (g): ExpiryActivity => ({
+        ...g,
+        id: `expired-${g.hash}`,
+        purpose: "expire",
+        createdAt: g.observedAt,
+      }),
+    ),
+  ].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
   const localOperations = (view?.operations ?? []).filter(
     (a) => a.mint === mintUrl,
   );
@@ -772,15 +828,15 @@ export function App() {
                     <RefreshCw size={16} />
                   </button>
                 </div>
-                {!!view?.verified && view.expired > 0 && (
+                {!!closedBackings.length && (
                   <p
                     className="small muted"
                     role="status"
                     data-testid="expired-balance"
                   >
-                    Expired token records: {format(view.expired)} sats. Their
-                    backing settled or reached its deadline; these tokens are no
-                    longer spendable. Their records remain stored on this
+                    Expired token records: {format(view?.expired ?? 0)} sats.
+                    Their backing settled or reached its deadline; these tokens
+                    are no longer spendable. Their records remain stored on this
                     device.
                   </p>
                 )}
@@ -845,6 +901,8 @@ export function App() {
                       );
                     })}
                   </div>
+                ) : closedBackings.length ? (
+                  <p className="quiet-empty">No active backings.</p>
                 ) : (
                   <div className="empty-state">
                     <div className="empty-illustration">
@@ -865,6 +923,51 @@ export function App() {
                       Add your first sats <ArrowRight size={16} />
                     </button>
                   </div>
+                )}
+                {!!closedBackings.length && (
+                  <>
+                    <h3 className="expired-backings-heading">
+                      Expired backings{" "}
+                      <span className="count">{closedBackings.length}</span>
+                    </h3>
+                    <div className="backings-list">
+                      {closedBackings.map((g) => {
+                        const value = g.amount || g.sharedAmount;
+                        return (
+                          <article className="backing expired" key={g.hash}>
+                            <div className="backing-top">
+                              <span className="mono small">
+                                {short(g.hash)}
+                              </span>
+                              <span className="badge">
+                                <Clock3 size={12} /> Expired
+                              </span>
+                            </div>
+                            <div
+                              className="backing-amount"
+                              style={amountStyle(format(value))}
+                            >
+                              {format(value)}{" "}
+                              <span>{g.amount ? "sats" : "sats shared"}</span>
+                            </div>
+                            <div className="backing-bottom">
+                              <span>No longer spendable</span>
+                              <span>
+                                Backing settled or its deadline passed.
+                              </span>
+                              {g.amount > 0 && g.sharedAmount > 0 && (
+                                <span>
+                                  Also {format(g.sharedAmount)} sats in shared
+                                  tokens.
+                                </span>
+                              )}
+                              <span>{observedLabel(g.observedAt)}</span>
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </>
                 )}
               </section>
               <aside className="principles-card">
