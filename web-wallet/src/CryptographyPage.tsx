@@ -18,7 +18,7 @@ import "./cryptography.css";
 const sections = [
   ["backing", "A deposit with a secret"],
   ["issuance", "What the mint signs"],
-  ["ownership", "Proving the right to spend"],
+  ["ownership", "Ownership and receiving ecash"],
   ["swaps", "A private swap"],
   ["redemption", "Back to Lightning"],
   ["trust", "Expiry, privacy, and trust"],
@@ -332,9 +332,96 @@ export function CryptographyPage() {
                 <aside className="crypto-aside">
                   Until the receiver refreshes, both sender and receiver may
                   hold the same bearer secrets. The first successful spend wins.
-                  The backing preimage travels with normal wallet transfers too;
-                  it is not an owner secret and does not rotate on receipt.
                 </aside>
+                <h3>The backing preimage must travel too.</h3>
+                <p>
+                  A normal wallet send includes the backing preimage{" "}
+                  <code>P</code>
+                  alongside the credentials, payment hash <code>H</code>, and
+                  original backing amount <code>A</code>. The sender passes this
+                  bundle privately to the recipient. Every later holder needs{" "}
+                  <code>P</code> to redeem to Lightning without asking the
+                  original funder for help.
+                </p>
+                <p>
+                  The recipient checks <code>SHA-256(P) = H</code> locally.
+                  Receiving and private swaps do not send <code>P</code> to the
+                  mint; a Lightning melt must reveal it for every backing used.
+                  Swaps retire old credentials without revealing that preimage.
+                  Refreshing rotates the owner secret <code>s</code>, while
+                  <code> P</code> stays the same across all fragments of one
+                  hold. Knowing <code>P</code> alone does not authorize spending
+                  someone else’s credential: its owner proof is still required.
+                </p>
+                <aside className="crypto-aside">
+                  The current token format permits a missing preimage. The
+                  browser can receive and refresh that credential, but cannot
+                  melt it or use the normal Send flow until the matching
+                  preimage is added. For a payment you can redeem independently,
+                  require the preimage as part of receipt.
+                </aside>
+                <h3>How the receiver checks the backing and value</h3>
+                <ol>
+                  <li>
+                    <strong>Identify the mint.</strong> The wallet checks the
+                    bundle’s mint URL against the connected mint and verifies
+                    credentials with that mint’s public denomination keys and
+                    matching keyset identifier. A sender’s choice of mint does
+                    not make it trustworthy.
+                  </li>
+                  <li>
+                    <strong>Bind the metadata to the credential.</strong> Check
+                    the supplied preimage against <code>H</code> and recompute
+                    <code> h</code> from <code>H</code> and the original amount
+                    <code> A</code> using the formula above. It must equal the
+                    credential’s signed attribute. This prevents substituting a
+                    different payment hash or backing amount while retaining a
+                    valid signature.
+                  </li>
+                  <li>
+                    <strong>Verify and total the denominations.</strong> For
+                    each fragment, verify the PS signature with the key for its
+                    claimed denomination <code>d</code>. Changing that amount
+                    selects the wrong key and fails verification. Reject
+                    duplicate nullifiers, then sum the verified denominations
+                    and compare that total with the payment you expected. The
+                    original backing amount <code>A</code> is not the amount
+                    being sent.
+                  </li>
+                  <li>
+                    <strong>Check the live backing.</strong> Ask the mint about
+                    each <code>H</code> through{" "}
+                    <code>POST /v1/htlcs/check</code>. Its returned held amount
+                    must match <code>A</code>, and the redemption cutoff must
+                    still be in the future. A missing or unavailable backing
+                    does not pass the check. This sends the payment hash, not
+                    the preimage, to the mint.
+                  </li>
+                  <li>
+                    <strong>Check and refresh ownership.</strong> Query the
+                    input nullifiers through <code>POST /v1/checkstate</code>{" "}
+                    and require <code>UNSPENT</code>. A status check alone
+                    cannot prevent a competing spend. The receiver then swaps
+                    into fresh owner secrets; the mint consumes the old
+                    nullifiers atomically, and the wallet verifies the returned
+                    credentials and denominations. The backing metadata and
+                    preimage stay with the refreshed tokens.
+                  </li>
+                </ol>
+                <Equation>
+                  {
+                    "original backing A = 1,000 sats\nreceived fragments = 8 sats + 2 sats\nreceived payment = 10 sats, not 1,000 sats"
+                  }
+                </Equation>
+                <p>
+                  These checks establish authentic claims for the stated value
+                  and a mint-reported live backing. They do not independently
+                  prove that Lightning funds remain locked. The mint can
+                  misreport its backend, backing can close after a check, and a
+                  previous holder can reveal the shared preimage. Receipt
+                  therefore still depends on the mint honoring redemption and
+                  its settlement policy.
+                </p>
               </section>
 
               <section id="swaps" aria-labelledby="swaps-title">
@@ -403,7 +490,10 @@ export function CryptographyPage() {
                   Paying a BOLT11 invoice is a <em>melt</em>. Unlike a private
                   swap, it can combine tokens from different holds. It reveals
                   each backing preimage <code>P</code> and original amount, and
-                  proves ownership with the backing attribute public.
+                  proves ownership with the backing attribute public. The mint
+                  hashes each supplied preimage, recomputes the backing
+                  attribute, and checks it against the signed credential. A
+                  credential without its matching preimage cannot be melted.
                 </p>
                 <Equation>
                   {
@@ -482,6 +572,13 @@ export function CryptographyPage() {
                   </a>
                   <a href="https://github.com/a1denvalu3/tmp.cash/blob/main/tmp_cash/mint.py">
                     Mint lifecycle <ArrowUpRight size={14} aria-hidden="true" />
+                  </a>
+                  <a href="https://github.com/a1denvalu3/tmp.cash/blob/main/web-wallet/packages/cashu-ts/src/tmp-cash/client.ts">
+                    Wallet verification{" "}
+                    <ArrowUpRight size={14} aria-hidden="true" />
+                  </a>
+                  <a href="https://github.com/a1denvalu3/tmp.cash/blob/main/web-wallet/packages/coco/tmp-cash/Manager.ts">
+                    Receive flow <ArrowUpRight size={14} aria-hidden="true" />
                   </a>
                   <a href="https://github.com/a1denvalu3/tmp.cash#readme">
                     Protocol documentation{" "}
