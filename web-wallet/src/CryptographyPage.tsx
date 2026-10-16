@@ -528,13 +528,22 @@ export function CryptographyPage() {
                 <SectionTitle index={5} />
                 <h3>The claim ends with the hold.</h3>
                 <p>
-                  Settling, canceling, or timing out the backing ends every
-                  remaining token’s claim. Redeem before the wallet’s published
+                  A token’s claim ends if its backing is settled, expires, or is
+                  released by the backend. Redeem before the wallet’s published
                   cutoff. For LND it accounts for the earliest accepted HTLC
                   expiry, the node’s early cancellation delta, and a settlement
                   margin. Spark uses the funded contract’s reported expiry minus
                   a margin. These deadlines are separate from the invoice’s
                   payment window.
+                </p>
+                <p>
+                  The original payer cannot unilaterally recall an accepted
+                  Lightning hold. On LND, however, the receiving node operator
+                  can cancel a held invoice without the preimage, failing the
+                  payment back toward its payer. This releases the backing;
+                  collecting it still requires <code>P</code>. tmp.cash’s
+                  production adapters do not request early cancellation, but
+                  treat a backend-reported cancellation or return as terminal.
                 </p>
                 <p>
                   If no preimage has been revealed, the mint cannot settle and
@@ -582,6 +591,10 @@ export function CryptographyPage() {
                   </a>
                   <a href="https://github.com/a1denvalu3/tmp.cash#readme">
                     Protocol documentation{" "}
+                    <ArrowUpRight size={14} aria-hidden="true" />
+                  </a>
+                  <a href="https://lightning.engineering/api-docs/api/lnd/invoices/cancel-invoice/">
+                    LND invoice cancellation{" "}
                     <ArrowUpRight size={14} aria-hidden="true" />
                   </a>
                 </div>
