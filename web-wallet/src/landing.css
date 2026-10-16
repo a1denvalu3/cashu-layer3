@@ -907,6 +907,45 @@
 .landing-footer > .text-button {
   font-size: 10px;
 }
+.landing-crypto-link {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-top: 28px;
+  padding: 24px 28px;
+  border: 1px solid var(--accent-line);
+  border-radius: 12px;
+  background: var(--paper);
+}
+.landing-crypto-link:hover {
+  background: var(--subtle);
+}
+.crypto-link-icon {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  background: var(--soft-green);
+  border-radius: 12px;
+  color: var(--landing-accent);
+}
+.landing-crypto-link strong {
+  display: block;
+  font-size: 17px;
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+.landing-crypto-link strong + span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.landing-crypto-link > svg {
+  margin-left: auto;
+  color: var(--landing-accent);
+}
 @media (max-width: 1000px) {
   .landing-shell {
     --shell-gutter: 30px;
@@ -955,6 +994,20 @@
   }
 }
 @media (max-width: 740px) {
+  .landing-crypto-link {
+    padding: 20px;
+    gap: 13px;
+  }
+  .landing-crypto-link strong {
+    font-size: 14px;
+  }
+  .landing-crypto-link strong + span {
+    font-size: 11px;
+  }
+  .crypto-link-icon {
+    width: 36px;
+    height: 36px;
+  }
   .landing-shell {
     --shell-gutter: 21px;
   }

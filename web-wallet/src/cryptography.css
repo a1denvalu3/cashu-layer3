@@ -1,0 +1,494 @@
+.crypto-hero {
+  padding: 74px 0 0;
+  border-bottom: 1px solid var(--line);
+}
+.crypto-hero h1 {
+  margin: 25px 0;
+  font-size: clamp(40px, 5.3vw, 68px);
+  line-height: 1.12;
+  letter-spacing: -3px;
+  font-weight: 500;
+}
+.crypto-hero h1 > span {
+  color: var(--landing-accent);
+}
+.crypto-lead {
+  max-width: 660px;
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1.8;
+}
+.crypto-view-links {
+  display: flex;
+  gap: 26px;
+  margin-top: 36px;
+}
+.crypto-view-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 51px;
+  padding: 8px 0 17px;
+  color: var(--muted);
+  font-size: 13px;
+  border-bottom: 2px solid transparent;
+}
+.crypto-view-links a[aria-current] {
+  border-color: var(--landing-accent);
+  color: var(--ink);
+}
+.crypto-layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 65px;
+  padding: 56px 0 70px;
+}
+.crypto-toc {
+  order: 0;
+  position: sticky;
+  top: 32px;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  margin: 0;
+}
+.crypto-toc > .eyebrow {
+  margin: 0 0 17px 0;
+  color: var(--muted);
+  font-size: 9px;
+}
+.crypto-toc a {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 12px 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.crypto-toc a:hover,
+.landing-header a[aria-current] {
+  color: var(--landing-accent);
+}
+.crypto-toc a .mono {
+  font-size: 10px;
+  color: var(--landing-accent);
+}
+.crypto-toc-note {
+  margin-top: 24px;
+  padding-top: 21px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.9;
+}
+.crypto-article {
+  min-width: 0;
+  max-width: 720px;
+}
+.crypto-article > section + section {
+  margin-top: 46px;
+  padding-top: 42px;
+  border-top: 1px solid var(--line);
+}
+.landing .crypto-article h2 {
+  display: flex;
+  align-items: baseline;
+  gap: 15px;
+  margin: 0 0 22px;
+  font-size: 28px;
+  font-weight: 500;
+  letter-spacing: -0.9px;
+  line-height: 1.3;
+}
+.crypto-article h2 .mono {
+  font-size: 11px;
+  letter-spacing: 0;
+  color: var(--landing-accent);
+}
+.crypto-article h3 {
+  font-size: 18px;
+  font-weight: 500;
+  margin: 28px 0 10px;
+  letter-spacing: -0.3px;
+}
+.crypto-article p,
+.crypto-article li {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.9;
+}
+.crypto-article p {
+  margin: 16px 0;
+}
+.crypto-article em {
+  color: var(--ink);
+}
+.crypto-article ol {
+  margin: 22px 0;
+  padding-left: 22px;
+}
+.crypto-article li {
+  padding-left: 7px;
+  margin: 12px 0;
+}
+.crypto-article li::marker {
+  font-family: "DM Mono", monospace;
+  color: var(--landing-accent);
+}
+.crypto-article code {
+  font-family: "DM Mono", monospace;
+  font-size: 0.88em;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.crypto-equation {
+  margin: 24px 0;
+  padding: 23px 25px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 2;
+}
+.crypto-equation code {
+  font-size: inherit;
+}
+.crypto-aside {
+  margin: 24px 0;
+  padding: 4px 0 4px 19px;
+  border-left: 2px solid var(--accent-line);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.85;
+}
+.crypto-aside-warning {
+  padding: 18px 20px;
+  background: var(--warning-surface);
+  border-color: var(--warning-line);
+  border-radius: 0 8px 8px 0;
+  color: var(--warning-text);
+}
+.crypto-aside-warning code,
+.crypto-aside-warning em {
+  color: inherit;
+}
+.crypto-details {
+  margin: 25px 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0 20px;
+  background: var(--subtle);
+}
+.crypto-details summary {
+  cursor: pointer;
+  min-height: 52px;
+  padding: 17px 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.crypto-details summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 4px;
+}
+.crypto-details summary::marker {
+  color: var(--landing-accent);
+}
+.crypto-swap {
+  margin: 28px 0;
+  border: 1px solid var(--accent-line);
+  border-radius: 12px;
+  padding: 22px;
+  background: var(--paper);
+}
+.crypto-swap-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  font-size: 13px;
+}
+.crypto-swap-controls {
+  display: flex;
+  gap: 3px;
+  background: var(--surface);
+  padding: 3px;
+  border-radius: 8px;
+}
+.crypto-swap-controls button {
+  min-height: 36px;
+  padding: 8px 13px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+}
+.crypto-swap-controls button[aria-pressed="true"] {
+  background: var(--button-bg);
+  color: var(--button-text);
+}
+.crypto-swap-backing {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  padding: 14px 0;
+  margin-top: 20px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+}
+.crypto-swap-backing > .mono {
+  margin-left: auto;
+  color: var(--landing-accent);
+  font-size: 9px;
+}
+.crypto-swap-flow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 22px minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+  margin: 25px 0;
+}
+.crypto-swap-side > .eyebrow {
+  color: var(--muted);
+  font-size: 9px;
+}
+.crypto-notes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-content: center;
+  min-height: 150px;
+  padding: 15px 0;
+}
+.crypto-note {
+  display: grid;
+  gap: 8px;
+  flex: 1 1 55px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.crypto-note-new {
+  background: var(--soft-green);
+  border-color: var(--accent-line);
+}
+.crypto-note strong {
+  font-size: 18px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.crypto-note strong > span {
+  font-size: 9px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.crypto-note > .mono {
+  color: var(--muted);
+  font-size: 10px;
+}
+.crypto-swap-arrow {
+  color: var(--landing-accent);
+}
+.crypto-swap-caption {
+  font-size: 10px;
+  color: var(--muted);
+}
+.crypto-article .crypto-swap-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding-top: 17px;
+  margin-bottom: 0;
+  border-top: 1px solid var(--line);
+  color: var(--accent-text);
+  font-size: 12px;
+}
+.crypto-swap-status svg {
+  margin-top: 3px;
+}
+.crypto-article .crypto-swap-footnote {
+  margin-bottom: 0;
+  font-size: 11px;
+  line-height: 1.8;
+}
+.crypto-source-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  margin-top: 30px;
+}
+.crypto-source-links > .eyebrow {
+  width: 100%;
+  color: var(--muted);
+  font-size: 9px;
+  margin-bottom: 6px;
+}
+.crypto-source-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  font-size: 11px;
+  color: var(--landing-accent);
+}
+.crypto-source-links a:hover,
+.crypto-view-links a:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.crypto-next {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 28px;
+  padding: 38px;
+  border: 1px solid var(--accent-line);
+  border-radius: 14px;
+  background: var(--soft-green);
+  margin-bottom: 50px;
+}
+.crypto-next .eyebrow {
+  color: var(--accent-text);
+  font-size: 9px;
+}
+.landing .crypto-next h2 {
+  font-size: 31px;
+  letter-spacing: -1px;
+  font-weight: 500;
+  margin: 13px 0 10px;
+}
+.crypto-next p {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+  line-height: 1.8;
+}
+.crypto-next-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.crypto-next-actions .text-button {
+  font-size: 11px;
+  min-height: 36px;
+}
+@media (max-width: 1000px) {
+  .crypto-layout {
+    grid-template-columns: 200px minmax(0, 1fr);
+    gap: 32px;
+  }
+}
+@media (max-width: 900px) {
+  .crypto-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 36px;
+    padding-top: 32px;
+  }
+  .crypto-toc {
+    position: static;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 20px;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 24px;
+  }
+  .crypto-toc > .eyebrow {
+    grid-column: 1 / -1;
+    margin-bottom: 8px;
+  }
+  .crypto-toc a {
+    padding-block: 8px;
+    font-size: 11px;
+  }
+  .crypto-toc-note {
+    display: none;
+  }
+  .crypto-article {
+    max-width: none;
+  }
+  .crypto-notes {
+    min-height: 100px;
+  }
+}
+@media (max-width: 540px) {
+  .crypto-hero {
+    padding-top: 45px;
+  }
+  .crypto-hero h1 {
+    font-size: clamp(35px, 8vw, 43px);
+    letter-spacing: -1.6px;
+    margin-top: 23px;
+  }
+  .crypto-lead {
+    font-size: 14px;
+  }
+  .crypto-view-links {
+    margin-top: 23px;
+  }
+  .crypto-toc {
+    column-gap: 12px;
+  }
+  .crypto-toc a {
+    gap: 7px;
+    font-size: 10px;
+  }
+  .crypto-toc a .mono {
+    font-size: 9px;
+  }
+  .landing .crypto-article h2 {
+    font-size: 24px;
+    gap: 11px;
+  }
+  .crypto-article p,
+  .crypto-article li {
+    font-size: 13px;
+  }
+  .crypto-equation {
+    padding: 16px;
+    font-size: 11px;
+  }
+  .crypto-aside {
+    font-size: 12px;
+  }
+  .crypto-details {
+    padding-inline: 15px;
+  }
+  .crypto-swap {
+    padding: 17px;
+  }
+  .crypto-swap-flow {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 15px;
+  }
+  .crypto-swap-arrow {
+    justify-self: center;
+    transform: rotate(90deg);
+  }
+  .crypto-notes {
+    min-height: 0;
+    padding-block: 10px;
+  }
+  .crypto-note {
+    padding: 12px 10px;
+  }
+  .crypto-swap-backing {
+    font-size: 10px;
+  }
+  .crypto-next {
+    padding: 26px;
+  }
+  .crypto-next-actions {
+    align-items: flex-start;
+  }
+}

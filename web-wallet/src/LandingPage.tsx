@@ -3,7 +3,6 @@ import {
   ArrowDown,
   ArrowUpRight,
   Clock3,
-  Code2,
   Fingerprint,
   Layers3,
   Pause,
@@ -12,21 +11,15 @@ import {
   ChevronDown,
   UnlockKeyhole,
   LockKeyhole,
-  Moon,
-  Sun,
   Zap,
 } from "lucide-react";
-import { useTheme } from "./theme";
 import { TmpCashMark } from "./TmpCashMark";
+import {
+  PublicPageFooter,
+  PublicPageHeader,
+  WalletLink,
+} from "./PublicPageChrome";
 import "./landing.css";
-
-function WalletLink() {
-  return (
-    <a className="button dark landing-open" href="/wallet/">
-      Open wallet <ArrowUpRight size={17} aria-hidden="true" />
-    </a>
-  );
-}
 
 function CashIllustration() {
   return (
@@ -377,43 +370,13 @@ const questions = [
 ];
 
 export function LandingPage() {
-  const { theme, changePreference } = useTheme();
   return (
     <div className="landing">
       <a className="landing-skip" href="#main">
         Skip to content
       </a>
       <div className="landing-shell">
-        <header className="header landing-header">
-          <a className="brand" href="/" aria-label="tmp.cash home">
-            <span className="brand-mark">
-              <TmpCashMark size={25} strokeWidth={1.6} aria-hidden="true" />
-            </span>
-            tmp<span>.cash</span>
-          </a>
-          <nav aria-label="Main navigation">
-            <a href="#how-it-works">How it works</a>
-            <a href="#know-the-rules">Questions</a>
-          </nav>
-          <div className="header-tools">
-            <button
-              className="icon-button theme-toggle"
-              aria-label={
-                theme === "dark" ? "Use light mode" : "Use night mode"
-              }
-              onClick={() =>
-                changePreference(theme === "dark" ? "light" : "dark")
-              }
-            >
-              {theme === "dark" ? (
-                <Sun size={19} aria-hidden="true" />
-              ) : (
-                <Moon size={19} aria-hidden="true" />
-              )}
-            </button>
-            <WalletLink />
-          </div>
-        </header>
+        <PublicPageHeader />
         <main id="main">
           <section className="landing-hero" aria-labelledby="hero-title">
             <div className="hero-copy">
@@ -494,6 +457,21 @@ export function LandingPage() {
             </aside>
           </section>
           <TransferDiagram />
+          <a
+            className="landing-crypto-link"
+            href="/how-it-works/?view=cryptography"
+          >
+            <span className="crypto-link-icon">
+              <Fingerprint size={26} strokeWidth={1.4} aria-hidden="true" />
+            </span>
+            <span>
+              <strong>How does the cryptography work?</strong>
+              <span>
+                Follow the signatures, private swaps, and Lightning redemption.
+              </span>
+            </span>
+            <ArrowUpRight size={22} aria-hidden="true" />
+          </a>
           <section
             className="landing-rules"
             id="know-the-rules"
@@ -531,19 +509,7 @@ export function LandingPage() {
             />
           </section>
         </main>
-        <footer className="landing-footer">
-          <span>
-            <span className="status-dot" /> tmp.cash · EXPERIMENTAL ECASH
-          </span>
-          <span>Frozen Lightning deposits. Private ecash transfers.</span>
-          <a
-            href="https://github.com/a1denvalu3/cashu-layer3"
-            className="text-button"
-          >
-            <Code2 size={15} aria-hidden="true" /> View the source{" "}
-            <ArrowUpRight size={13} aria-hidden="true" />
-          </a>
-        </footer>
+        <PublicPageFooter />
       </div>
     </div>
   );
