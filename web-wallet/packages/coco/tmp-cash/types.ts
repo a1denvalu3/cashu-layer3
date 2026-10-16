@@ -79,6 +79,7 @@ export interface TmpCashRepository {
     activity: TmpCashActivity,
   ): Promise<void>;
   release(operation: TmpCashOperation): Promise<void>;
+  expire(operation: TmpCashOperation): Promise<void>;
   setError(id: string, message: string): Promise<void>;
   updateProofStates(
     changes: { id: string; state: TmpCashProofState }[],

@@ -531,6 +531,31 @@ export class TmpCashManager {
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Operation failed";
+      if (
+        op.payload.kind === "melt" &&
+        error instanceof PSMintError &&
+        error.status === 410 &&
+        error.message === "melt payment failed; backing has expired"
+      ) {
+        // Terminal: the backing closed before the payout failed, so the
+        // reserved inputs must never be reused. The mint keeps the wire
+        // nullifiers UNSPENT; expire them locally and clear the operation.
+        try {
+          await this.repo.expire(op);
+        } catch (expireError) {
+          // The saved journal changed underneath this attempt. Keep the
+          // operation reserved with a visible note, and still replay the
+          // terminal mint rejection so retry handling stays explicit.
+          await this.repo.setError(
+            op.id,
+            expireError instanceof Error
+              ? `${message}; local expiry blocked: ${expireError.message}`
+              : message,
+          );
+        }
+        await this.changed();
+        throw error;
+      }
       await this.repo.setError(op.id, message);
       if (
         op.payload.kind === "melt" &&
@@ -543,6 +568,7 @@ export class TmpCashManager {
           "backing HTLC redemption deadline has passed",
           "melt quote already belongs to another request",
           "payout invoice is already paid",
+          "backing HTLC is too close to its settlement cutoff for a new melt",
         ].includes(error.message)
       ) {
         try {

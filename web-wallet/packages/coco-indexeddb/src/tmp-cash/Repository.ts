@@ -161,6 +161,36 @@ export class TmpCashIndexedDbRepository
       await this.operations.delete(op.id);
     });
   }
+  async expire(op: TmpCashOperation): Promise<void> {
+    await this.runTransaction("rw", ["operations", "proofs"], async () => {
+      const saved = await this.operations.get(op.id);
+      if (!saved) return;
+      if (
+        saved.mint !== op.mint ||
+        JSON.stringify(saved.payload) !== JSON.stringify(op.payload)
+      )
+        throw new Error("Saved operation changed");
+      const inputs = await this.proofs
+        .where("operationId")
+        .equals(op.id)
+        .toArray();
+      // Terminal melt failure: the mint released its reservation, but the
+      // backing is closed, so these inputs must never become ready again.
+      const observedAt = Date.now();
+      for (const proof of inputs) {
+        if (proof.state !== "reserved")
+          throw new Error("Input reservation changed");
+        const { expiredAt, ...record } = proof;
+        await this.proofs.put({
+          ...record,
+          state: "expired",
+          operationId: null,
+          expiredAt: expiredAt ?? observedAt,
+        });
+      }
+      await this.operations.delete(op.id);
+    });
+  }
   async setError(id: string, error: string): Promise<void> {
     await this.operations.update(id, { error: error.slice(0, 500) });
   }

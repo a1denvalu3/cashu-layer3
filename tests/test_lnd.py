@@ -174,35 +174,39 @@ async def test_lnd_hold_uses_supplied_hash_and_accepted_is_not_settled(tmp_path)
     await backend.close()
 
 
+def tracked_stream(*updates):
+    return "\n".join(
+        update if isinstance(update, str) else json.dumps(update) for update in updates
+    )
+
+
+def track_path(payment_hash):
+    encoded = base64.urlsafe_b64encode(bytes.fromhex(payment_hash)).decode()
+    return f"/v2/router/track/{encoded}"
+
+
 @pytest.mark.asyncio
-async def test_lnd_payment_lookup_paginates_and_validates_preimage(tmp_path):
+async def test_lnd_payment_tracking_uses_trackv2_and_validates_preimage(tmp_path):
     payment_hash = hashlib.sha256(PREIMAGE).hexdigest()
-    offsets = []
     wrong = False
+    paths = []
 
     def respond(request):
-        offsets.append(request.url.params["index_offset"])
-        if request.url.params["index_offset"] == "0":
-            return httpx.Response(
-                200,
-                json={
-                    "payments": [{"payment_hash": "00" * 32, "status": "FAILED"}],
-                    "last_index_offset": "1000",
-                },
-            )
+        paths.append(request.url.path)
+        assert request.url.path == track_path(payment_hash)
         return httpx.Response(
             200,
-            json={
-                "payments": [
-                    {
+            content=tracked_stream(
+                {"result": {"payment_hash": payment_hash, "status": "IN_FLIGHT"}},
+                {
+                    "result": {
                         "payment_hash": payment_hash,
                         "status": "SUCCEEDED",
                         "payment_preimage": "00" * 32 if wrong else PREIMAGE.hex(),
                         "fee_msat": "1501",
                     }
-                ],
-                "last_index_offset": "1001",
-            },
+                },
+            ),
         )
 
     macaroon = tmp_path / "admin.macaroon"
@@ -214,8 +218,213 @@ async def test_lnd_payment_lookup_paginates_and_validates_preimage(tmp_path):
     assert payment.state == PaymentState.succeeded
     assert payment.preimage == PREIMAGE
     assert payment.fee_msat == 1501
-    assert offsets == ["0", "1000"]
+    assert paths == [track_path(payment_hash)]
     wrong = True
     with pytest.raises(BackendError, match="invalid preimage"):
         await backend.get_payment(payment_hash)
+    await backend.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["INITIATED", "IN_FLIGHT"])
+async def test_lnd_payment_tracking_maps_live_statuses_to_pending(tmp_path, status):
+    payment_hash = hashlib.sha256(PREIMAGE).hexdigest()
+
+    def respond(request):
+        assert request.url.path == track_path(payment_hash)
+        # The track stream stays open for live payments; LND closes it only at
+        # a terminal state. Ending the body simulates a dropped connection.
+        return httpx.Response(
+            200,
+            content=tracked_stream(
+                {"result": {"payment_hash": payment_hash, "status": status}}
+            ),
+        )
+
+    macaroon = tmp_path / "admin.macaroon"
+    macaroon.write_bytes(b"test-only macaroon")
+    backend = LndRestBackend(
+        "https://lnd.test", macaroon, transport=httpx.MockTransport(respond)
+    )
+    payment = await backend.get_payment(payment_hash)
+    assert payment is not None
+    assert payment.state == PaymentState.pending
+    assert payment.preimage is None
+    await backend.close()
+
+
+@pytest.mark.asyncio
+async def test_lnd_payment_tracking_maps_failed(tmp_path):
+    payment_hash = hashlib.sha256(PREIMAGE).hexdigest()
+
+    def respond(request):
+        assert request.url.path == track_path(payment_hash)
+        return httpx.Response(
+            200,
+            content=tracked_stream(
+                {"result": {"payment_hash": payment_hash, "status": "INITIATED"}},
+                {"result": {"payment_hash": payment_hash, "status": "FAILED"}},
+            ),
+        )
+
+    macaroon = tmp_path / "admin.macaroon"
+    macaroon.write_bytes(b"test-only macaroon")
+    backend = LndRestBackend(
+        "https://lnd.test", macaroon, transport=httpx.MockTransport(respond)
+    )
+    payment = await backend.get_payment(payment_hash)
+    assert payment is not None
+    assert payment.state == PaymentState.failed
+    await backend.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("not_found", ["stream_error", "http_404"])
+async def test_lnd_payment_tracking_not_found_is_unknown(tmp_path, not_found):
+    payment_hash = hashlib.sha256(PREIMAGE).hexdigest()
+
+    def respond(request):
+        assert request.url.path == track_path(payment_hash)
+        if not_found == "http_404":
+            return httpx.Response(404, json={"code": 5, "message": "not found"})
+        return httpx.Response(
+            200, content=tracked_stream({"error": {"code": 5, "message": "no payment"}})
+        )
+
+    macaroon = tmp_path / "admin.macaroon"
+    macaroon.write_bytes(b"test-only macaroon")
+    backend = LndRestBackend(
+        "https://lnd.test", macaroon, transport=httpx.MockTransport(respond)
+    )
+    assert await backend.get_payment(payment_hash) is None
+    await backend.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        "unknown_status",
+        "invalid_json",
+        "wrong_hash",
+        "non_hex_preimage",
+        "short_preimage",
+        "negative_fee",
+        "non_numeric_fee",
+        "missing_status",
+        "stream_error",
+    ],
+)
+async def test_lnd_payment_tracking_wraps_malformed_data(tmp_path, malformed):
+    payment_hash = hashlib.sha256(PREIMAGE).hexdigest()
+    succeeded = {
+        "payment_hash": payment_hash,
+        "status": "SUCCEEDED",
+        "payment_preimage": PREIMAGE.hex(),
+        "fee_msat": "1501",
+    }
+    if malformed == "unknown_status":
+        body = tracked_stream(
+            {"result": {"payment_hash": payment_hash, "status": "UNKNOWN"}}
+        )
+    elif malformed == "invalid_json":
+        body = '{"result": {"payment_hash": '  # Not valid JSON.
+    elif malformed == "wrong_hash":
+        body = tracked_stream({"result": {**succeeded, "payment_hash": "11" * 32}})
+    elif malformed == "non_hex_preimage":
+        body = tracked_stream(
+            {"result": {**succeeded, "payment_preimage": "not hex secret"}}
+        )
+    elif malformed == "short_preimage":
+        body = tracked_stream({"result": {**succeeded, "payment_preimage": "00" * 31}})
+    elif malformed == "negative_fee":
+        body = tracked_stream({"result": {**succeeded, "fee_msat": "-1"}})
+    elif malformed == "non_numeric_fee":
+        body = tracked_stream({"result": {**succeeded, "fee_msat": "secret"}})
+    elif malformed == "missing_status":
+        body = tracked_stream({"result": {"payment_hash": payment_hash}})
+    else:
+        body = tracked_stream({"error": {"code": 13, "message": "secret detail"}})
+
+    def respond(request):
+        assert request.url.path == track_path(payment_hash)
+        return httpx.Response(200, content=body)
+
+    macaroon = tmp_path / "admin.macaroon"
+    macaroon.write_bytes(b"test-only macaroon")
+    backend = LndRestBackend(
+        "https://lnd.test", macaroon, transport=httpx.MockTransport(respond)
+    )
+    with pytest.raises(BackendError) as error:
+        await backend.get_payment(payment_hash)
+    assert "secret" not in str(error.value)
+    await backend.close()
+
+
+@pytest.mark.asyncio
+async def test_lnd_payment_tracking_deadline_ignores_heartbeats(tmp_path):
+    payment_hash = hashlib.sha256(PREIMAGE).hexdigest()
+
+    def respond(request):
+        assert request.url.path == track_path(payment_hash)
+        # Heartbeats keep every individual read inside the HTTP timeout while
+        # the definitive SUCCEEDED update never arrives within the deadline.
+        return httpx.Response(
+            200,
+            content=tracked_stream(
+                "",
+                {"result": {"payment_hash": payment_hash, "status": "IN_FLIGHT"}},
+                "",
+                {
+                    "result": {
+                        "payment_hash": payment_hash,
+                        "status": "SUCCEEDED",
+                        "payment_preimage": PREIMAGE.hex(),
+                        "fee_msat": "0",
+                    }
+                },
+            ),
+        )
+
+    macaroon = tmp_path / "admin.macaroon"
+    macaroon.write_bytes(b"test-only macaroon")
+    backend = LndRestBackend(
+        "https://lnd.test", macaroon, transport=httpx.MockTransport(respond)
+    )
+    backend.stream_timeout = 0  # Deadline already passed at the first update.
+    assert await backend.get_payment(payment_hash) is None
+    await backend.close()
+
+
+@pytest.mark.asyncio
+async def test_lnd_payment_tracking_deadline_returns_last_seen_state(
+    tmp_path, monkeypatch
+):
+    payment_hash = hashlib.sha256(PREIMAGE).hexdigest()
+
+    def respond(request):
+        assert request.url.path == track_path(payment_hash)
+        return httpx.Response(
+            200,
+            content=tracked_stream(
+                {"result": {"payment_hash": payment_hash, "status": "IN_FLIGHT"}},
+                {"result": {"payment_hash": payment_hash, "status": "IN_FLIGHT"}},
+            ),
+        )
+
+    calls = {"count": 0}
+
+    def fake_monotonic():
+        calls["count"] += 1
+        return 100.0 if calls["count"] <= 2 else 100.0 + 3600
+
+    monkeypatch.setattr(time, "monotonic", fake_monotonic)
+    macaroon = tmp_path / "admin.macaroon"
+    macaroon.write_bytes(b"test-only macaroon")
+    backend = LndRestBackend(
+        "https://lnd.test", macaroon, transport=httpx.MockTransport(respond)
+    )
+    payment = await backend.get_payment(payment_hash)
+    assert payment is not None
+    assert payment.state == PaymentState.pending
     await backend.close()

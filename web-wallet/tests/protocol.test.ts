@@ -967,6 +967,126 @@ describe("Coco operation journal and IndexedDB", () => {
     expect((await manager.melt(quote)).amount).toBe(10);
     expect((await manager.view()).balance).toBe(88);
   });
+  it("expires a terminally failed melt's inputs without releasing them", async () => {
+    const repo = repository();
+    let fail = false;
+    const fetcher: typeof fetch = async (input, init) => {
+      if (fail && String(input).endsWith("/v1/melt/bolt11"))
+        return new Response(
+          JSON.stringify({
+            detail: "melt payment failed; backing has expired",
+          }),
+          { status: 410, headers: { "Content-Type": "application/json" } },
+        );
+      return fetch(input, init);
+    };
+    const manager = new TmpCashManager(repo, mintUrl, fetcher);
+    await manager.init();
+    const funding = await manager.createFunding(100);
+    await control("accept", { payment_hash: funding.id });
+    await manager.pollFunding(funding.id);
+    const { request } = await control("receiver", { amount: 10 });
+    const quote = await manager.meltQuote(request);
+    fail = true;
+    await expect(manager.melt(quote)).rejects.toThrow("backing has expired");
+    // The operation is cleared and only its reserved input expires locally.
+    expect((await repo.read()).operations).toEqual([]);
+    const expired = (await repo.read()).proofs.filter(
+      (p) => p.state === "expired",
+    );
+    expect(expired.map((p) => p.proof.amount)).toEqual([64]);
+    expect(expired[0].operationId).toBeNull();
+    expect(expired[0].expiredAt).toEqual(expect.any(Number));
+    expect((await manager.view()).reserved).toBe(0);
+    expect((await manager.view()).expired).toBe(64);
+    expect((await manager.view()).balance).toBe(36);
+    // The mint released its reservation: the wire nullifier stays UNSPENT.
+    expect(await wallet.checkProofs(expired.map((p) => p.proof))).toEqual([
+      "UNSPENT",
+    ]);
+    // Once the backing closes, refresh must never revive the expired input.
+    await control("settle", { payment_hash: funding.id });
+    await manager.refresh();
+    const proofs = (await repo.read()).proofs;
+    expect(proofs.every((p) => p.state === "expired")).toBe(true);
+    expect((await manager.view()).balance).toBe(0);
+    expect((await manager.view()).expired).toBe(100);
+    // Nothing can be spent again, so no proof can be double-spent.
+    await expect(manager.melt(quote)).rejects.toThrow(
+      "Not enough redeemable tokens",
+    );
+  });
+  it("keeps a terminally failed melt reserved when its journal changed mid-flight", async () => {
+    const repo = repository();
+    let fail = false;
+    const fetcher: typeof fetch = async (input, init) => {
+      if (fail && String(input).endsWith("/v1/melt/bolt11")) {
+        // Simulate another tab mutating the reserved input before the
+        // terminal rejection is handled, so the expire guard refuses.
+        const reserved = (await repo.read()).proofs.find(
+          (p) => p.state === "reserved",
+        )!;
+        await repo.proofs.update(reserved.id, { state: "ready" });
+        return new Response(
+          JSON.stringify({
+            detail: "melt payment failed; backing has expired",
+          }),
+          { status: 410, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return fetch(input, init);
+    };
+    const manager = new TmpCashManager(repo, mintUrl, fetcher);
+    await manager.init();
+    const funding = await manager.createFunding(100);
+    await control("accept", { payment_hash: funding.id });
+    await manager.pollFunding(funding.id);
+    const { request } = await control("receiver", { amount: 10 });
+    const quote = await manager.meltQuote(request);
+    fail = true;
+    // The original terminal mint error propagates, not the guard failure.
+    await expect(manager.melt(quote)).rejects.toThrow("backing has expired");
+    const state = await repo.read();
+    // The operation stays reserved and records a concise visible error.
+    expect(state.operations).toHaveLength(1);
+    expect(state.operations[0].error).toContain("backing has expired");
+    expect(state.operations[0].error).toContain("Input reservation changed");
+    // expire never ran: no proof was expired or detached behind the guard.
+    expect(state.proofs.some((p) => p.state === "expired")).toBe(false);
+    expect(state.proofs.some((p) => p.expiredAt !== undefined)).toBe(false);
+    const tampered = state.proofs.find((p) => p.proof.amount === 64)!;
+    expect(tampered.state).toBe("ready");
+    expect(tampered.operationId).toBe(state.operations[0].id);
+  });
+  it("releases a melt rejected by the settlement-cutoff lockout after checking inputs", async () => {
+    const repo = repository();
+    let fail = true;
+    const fetcher: typeof fetch = async (input, init) => {
+      if (fail && String(input).endsWith("/v1/melt/bolt11"))
+        return new Response(
+          JSON.stringify({
+            detail:
+              "backing HTLC is too close to its settlement cutoff for a new melt",
+          }),
+          { status: 409, headers: { "Content-Type": "application/json" } },
+        );
+      return fetch(input, init);
+    };
+    const manager = new TmpCashManager(repo, mintUrl, fetcher);
+    await manager.init();
+    const funding = await manager.createFunding(100);
+    await control("accept", { payment_hash: funding.id });
+    await manager.pollFunding(funding.id);
+    const { request } = await control("receiver", { amount: 10 });
+    const quote = await manager.meltQuote(request);
+    await expect(manager.melt(quote)).rejects.toThrow("settlement cutoff");
+    expect((await repo.read()).operations).toEqual([]);
+    expect((await manager.view()).reserved).toBe(0);
+    expect((await manager.view()).balance).toBe(100);
+    fail = false;
+    expect((await manager.melt(quote)).amount).toBe(10);
+    expect((await manager.view()).balance).toBe(88);
+  });
   it("releases an expired melt quote after verifying its inputs remain unspent", async () => {
     const repo = repository(),
       manager = new TmpCashManager(repo, mintUrl);

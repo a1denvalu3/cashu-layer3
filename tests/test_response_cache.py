@@ -40,7 +40,7 @@ def operation(service, request):
 def test_successful_posts_reuse_validated_requests(service, operation, monkeypatch):
     kind, path, request = operation
     original = getattr(service.mint, kind)
-    spy = Mock(wraps=original) if kind == "swap" else AsyncMock(wraps=original)
+    spy = AsyncMock(wraps=original)
     monkeypatch.setattr(service.mint, kind, spy)
     http = service.client.http
     first = http.post(path, json=request.model_dump())
@@ -112,7 +112,7 @@ async def test_concurrent_identical_posts_share_success(
         started.set()
         await release.wait()
         result = original(request)
-        return result if kind == "swap" else await result
+        return await result
 
     spy = AsyncMock(side_effect=slow)
     monkeypatch.setattr(service.mint, kind, spy)
@@ -162,7 +162,7 @@ def test_new_app_uses_durable_recovery_with_an_empty_cache(
     first = service.client.http.post(path, json=request.model_dump())
     assert first.status_code == 200
     original = getattr(service.mint, kind)
-    spy = Mock(wraps=original) if kind == "swap" else AsyncMock(wraps=original)
+    spy = AsyncMock(wraps=original)
     monkeypatch.setattr(service.mint, kind, spy)
     with TestClient(create_app(service.mint, recovery=False)) as http:
         assert http.post(path, json=request.model_dump()).content == first.content
