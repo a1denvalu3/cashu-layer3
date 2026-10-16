@@ -710,6 +710,15 @@ p {
   font-size: 10px;
   color: var(--muted);
 }
+.expired-backings-heading {
+  margin: 24px 0 12px;
+  font-size: 14px;
+}
+.backing.expired .badge,
+.transaction-icon.expired {
+  color: var(--danger-text);
+  background: var(--danger-surface);
+}
 .activity-section {
   background: var(--paper);
   border: 1px solid var(--line);

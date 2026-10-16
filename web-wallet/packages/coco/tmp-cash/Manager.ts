@@ -121,7 +121,10 @@ export class TmpCashManager {
         candidates.map((p) => p.proof.payment_hash),
       );
       for (const p of candidates)
-        if (p.state !== "expired" && !this.isLive(p.proof))
+        if (
+          !this.isLive(p.proof) &&
+          (p.state !== "expired" || p.expiredAt === undefined)
+        )
           changes.push({ id: p.id, state: "expired" });
       const live = candidates.filter((p) => this.isLive(p.proof));
       // Old snapshots may have falsely expired live claims. Recovery must also

@@ -16,6 +16,8 @@ import {
 import { TmpCashManager } from "coco-cashu-core/tmp-cash";
 import { TmpCashIndexedDbRepository } from "coco-cashu-indexeddb/tmp-cash";
 import { denominationKeysetId } from "../packages/cashu-ts/src/tmp-cash/crypto";
+import { expiredBackings } from "../src/backings";
+import { decryptBackup, encryptBackup } from "../src/backup";
 
 let process: ChildProcess, mintUrl: string, wallet: PSWallet;
 const repos: TmpCashIndexedDbRepository[] = [];
@@ -545,14 +547,24 @@ describe("Coco operation journal and IndexedDB", () => {
     await control("accept", { payment_hash: funding.id });
     await manager.pollFunding(funding.id);
     const original = (await repo.read()).proofs;
-    for (const p of original)
-      await repo.proofs.update(p.id, { state: "expired" });
+    await repo.updateProofStates(
+      original.map((p) => ({ id: p.id, state: "expired" })),
+    );
+    expect(
+      expiredBackings((await repo.read()).proofs, [], mintUrl),
+    ).toHaveLength(1);
     const restarted = new TmpCashManager(repo, mintUrl);
     await restarted.init();
     expect((await restarted.view()).balance).toBe(100);
     expect((await restarted.view()).expired).toBe(0);
     expect((await repo.read()).proofs.map((p) => p.proof)).toEqual(
       original.map((p) => p.proof),
+    );
+    expect(
+      (await repo.read()).proofs.every((p) => p.expiredAt === undefined),
+    ).toBe(true);
+    expect(expiredBackings((await repo.read()).proofs, [], mintUrl)).toEqual(
+      [],
     );
 
     // Another wallet can spend a saved backup's proofs while their HTLC stays live.
@@ -563,13 +575,85 @@ describe("Coco operation journal and IndexedDB", () => {
         proofs: original.map((p) => p.proof),
       }),
     );
-    for (const p of original)
-      await repo.proofs.update(p.id, { state: "expired" });
+    await repo.updateProofStates(
+      original.map((p) => ({ id: p.id, state: "expired" })),
+    );
     await restarted.refresh();
     expect((await restarted.view()).balance).toBe(0);
     expect((await repo.read()).proofs.every((p) => p.state === "spent")).toBe(
       true,
     );
+    expect(
+      (await repo.read()).proofs.every((p) => p.expiredAt === undefined),
+    ).toBe(true);
+  });
+  it("keeps one expired backing with its observed time across refresh, reload, and backup restore", async () => {
+    const repo = repository(),
+      manager = new TmpCashManager(repo, mintUrl);
+    await manager.init();
+    const funding = await manager.createFunding(100);
+    await control("accept", { payment_hash: funding.id });
+    await manager.pollFunding(funding.id);
+    await manager.send(10);
+    const before = Date.now();
+    await control("settle", { payment_hash: funding.id });
+    await manager.refresh();
+    const state = await repo.read();
+    const expired = state.proofs.filter((p) => p.state === "expired");
+    const observedAt = expired[0].expiredAt!;
+    expect(observedAt).toBeGreaterThanOrEqual(before);
+    expect(observedAt).toBeLessThanOrEqual(Date.now());
+    expect(expired.every((p) => p.expiredAt === observedAt)).toBe(true);
+    const expected = [
+      { hash: funding.id, amount: 90, sharedAmount: 10, observedAt },
+    ];
+    expect(expiredBackings(state.proofs, state.activity, mintUrl)).toEqual(
+      expected,
+    );
+    expect(
+      expiredBackings(state.proofs, state.activity, "https://other.mint"),
+    ).toEqual([]);
+
+    await manager.refresh();
+    const restarted = new TmpCashManager(repo, mintUrl);
+    await restarted.init();
+    const refreshed = await repo.read();
+    expect(
+      expiredBackings(refreshed.proofs, refreshed.activity, mintUrl),
+    ).toEqual(expected);
+    expect((await restarted.view()).balance).toBe(0);
+
+    const password = "an expiry backup passphrase";
+    const backup = await decryptBackup(
+      await encryptBackup(refreshed, mintUrl, password),
+      password,
+    );
+    const restoredRepo = repository();
+    await restoredRepo.importState(backup.state);
+    const restored = new TmpCashManager(restoredRepo, mintUrl);
+    await restored.init();
+    const saved = await restoredRepo.read();
+    expect(expiredBackings(saved.proofs, saved.activity, mintUrl)).toEqual(
+      expected,
+    );
+
+    // Old backups contain expired proofs without observation timestamps.
+    const legacyRepo = repository();
+    await legacyRepo.importState({
+      ...state,
+      proofs: state.proofs.map(({ expiredAt: _expiredAt, ...proof }) => proof),
+    });
+    const legacy = await legacyRepo.read();
+    expect(
+      expiredBackings(legacy.proofs, legacy.activity, mintUrl)[0].observedAt,
+    ).toBeNull();
+    const legacyManager = new TmpCashManager(legacyRepo, mintUrl);
+    await legacyManager.init();
+    const upgraded = await legacyRepo.read();
+    expect(
+      expiredBackings(upgraded.proofs, upgraded.activity, mintUrl)[0]
+        .observedAt,
+    ).toBeGreaterThanOrEqual(observedAt);
   });
   it("keeps outgoing tokens excluded when recovering live change and never restores closed backing", async () => {
     const repo = repository(),

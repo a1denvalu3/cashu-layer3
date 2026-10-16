@@ -92,6 +92,14 @@ excluded from the available balance. An unavailable mint produces an unverified
 balance. Nothing becomes a claim against a mint balance after HTLC settlement.
 Backups do not extend deadlines.
 
+Expired backings remain visible below active backings and in Activity, with the
+amount held separately from tokens already shared. Their observation time is
+saved on the proofs and included in encrypted backups; it records when this
+wallet detected expiry, not the exact settlement or deadline time. These local
+records remain visible offline. Existing expired records acquire an observation
+time on the next successful status check. If verification later recovers a live
+claim, its expired entry disappears along with the incorrect expired status.
+
 Background status checks use the same wallet lock as minting and spending, so
 a snapshot taken before issuance cannot expire the newly stored outputs. Reloading
 also rechecks proofs previously marked expired: a live backing, valid credential,

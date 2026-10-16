@@ -168,14 +168,23 @@ export class TmpCashIndexedDbRepository
     changes: { id: string; state: TmpCashProofState }[],
   ): Promise<void> {
     await this.runTransaction("rw", ["proofs"], async () => {
+      const observedAt = Date.now();
       for (const { id, state } of changes) {
         const p = await this.proofs.get(id);
         if (
           p &&
           p.operationId === null &&
           ["ready", "sent", "pending", "expired"].includes(p.state)
-        )
-          await this.proofs.update(id, { state });
+        ) {
+          const { expiredAt, ...record } = p;
+          await this.proofs.put({
+            ...record,
+            state,
+            ...(state === "expired"
+              ? { expiredAt: expiredAt ?? observedAt }
+              : {}),
+          });
+        }
       }
     });
   }
