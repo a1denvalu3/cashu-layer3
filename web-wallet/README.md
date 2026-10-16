@@ -28,6 +28,8 @@ npm run dev
 
 Open **http://127.0.0.1:5173** for the explainer, then choose **Open wallet**.
 The wallet is also available directly at **http://127.0.0.1:5173/wallet/**.
+The cryptography explainer is at **http://127.0.0.1:5173/how-it-works/**,
+linked from the landing page navigation, diagram, and footer.
 The default mint is
 **http://127.0.0.1:3338**. Change it in Settings, or set `VITE_DEFAULT_MINT` before
 starting/building. Node 22.4+ is required. Fonts and scripts are bundled locally.
@@ -47,6 +49,12 @@ over HTTPS and use an HTTPS mint; browsers block mixed-content requests.
   mint trust. It opens without connecting to a mint or initializing wallet
   storage. **Open wallet** takes you to the
   wallet; **How tmp.cash works** in the wallet footer returns to the explainer.
+- **Cryptography:** a separate article explains the v3 backing attribute,
+  denomination signatures, owner proofs and nullifiers, private swaps, Lightning
+  melts, expiry, and mint trust. A split/combine example illustrates value and
+  backing conservation. Equations and expandable proof details follow the
+  implementation, including the difference between initial issuance and blind
+  reissuance. It opens without a mint connection or wallet storage.
 - **Add sats:** generates and durably saves a backing preimage, requests a HODL
   invoice with its hash, and displays the invoice/QR. Pay from a Lightning wallet.
   Once the payment is held (`ACCEPTED`), the wallet mints denomination proofs.
@@ -142,10 +150,11 @@ npm run test:e2e
 npm run test:e2e:production
 ```
 
-Build produces a static `dist/` with separate `index.html` and `wallet/index.html`
+Build produces a static `dist/` with separate `index.html`,
+`how-it-works/index.html`, and `wallet/index.html`
 entries, each with a Content Security Policy. Serve the complete directory from
 the same origin so the landing page and wallet share browser preferences and
-existing IndexedDB funds. The `/wallet/` entry supports direct visits and reloads
+existing IndexedDB funds. The `/wallet/` and `/how-it-works/` entries support direct visits and reloads
 without requiring a server-side SPA fallback. `npm test` runs
 cross-language integration tests against a disposable Python mint, including
 private swaps, combined melts, fee change, deadlines, double-spend reservations,

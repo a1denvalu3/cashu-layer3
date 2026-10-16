@@ -28,6 +28,9 @@ export default defineConfig(({ command }) => ({
     rollupOptions: {
       input: {
         landing: fileURLToPath(new URL("./index.html", import.meta.url)),
+        cryptography: fileURLToPath(
+          new URL("./how-it-works/index.html", import.meta.url),
+        ),
         wallet: fileURLToPath(new URL("./wallet/index.html", import.meta.url)),
       },
     },

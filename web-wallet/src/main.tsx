@@ -14,13 +14,19 @@ const Wallet = lazy(() =>
 const Landing = lazy(() =>
   import("./LandingPage").then(({ LandingPage }) => ({ default: LandingPage })),
 );
+const Cryptography = lazy(() =>
+  import("./CryptographyPage").then(({ CryptographyPage }) => ({
+    default: CryptographyPage,
+  })),
+);
 const root = document.getElementById("root")!;
 const isWallet = root.dataset.page === "wallet";
+const isCryptography = root.dataset.page === "cryptography";
 
 // Some static hosts serve the landing entry before normalizing a directory URL.
-if (window.location.pathname === "/wallet") {
+if (["/wallet", "/how-it-works"].includes(window.location.pathname)) {
   window.location.replace(
-    `/wallet/${window.location.search}${window.location.hash}`,
+    `${window.location.pathname}/${window.location.search}${window.location.hash}`,
   );
 } else {
   createRoot(root).render(
@@ -32,7 +38,13 @@ if (window.location.pathname === "/wallet") {
           </p>
         }
       >
-        {isWallet ? <Wallet /> : <Landing />}
+        {isWallet ? (
+          <Wallet />
+        ) : isCryptography ? (
+          <Cryptography />
+        ) : (
+          <Landing />
+        )}
       </Suspense>
     </React.StrictMode>,
   );
