@@ -559,6 +559,21 @@ export function App() {
       setError(err instanceof Error ? err.message : "Invalid URL");
     }
   }
+  const incomingToken = useMemo(() => {
+    if (dialog !== "receive" || !tokenText.trim())
+      return { token: null, error: "" };
+    try {
+      const token = decodePSToken(tokenText);
+      if (token.mint !== mintUrl)
+        return {
+          token: null,
+          error: `This token is from ${token.mint}. Connect to that mint in Settings to receive it.`,
+        };
+      return { token, error: "" };
+    } catch {
+      return { token: null, error: "Enter a valid cashuPS ecash token." };
+    }
+  }, [dialog, tokenText, mintUrl]);
   const closedBackings = useMemo(
     () => expiredBackings(view?.proofs ?? [], view?.activity ?? [], mintUrl),
     [view?.proofs, view?.activity, mintUrl],
@@ -1495,6 +1510,7 @@ export function App() {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
+                if (!incomingToken.token || !manager) return;
                 run(async () => {
                   const encoded = tokenText;
                   const token = manager!.wallet.verifyToken(
@@ -1546,13 +1562,40 @@ export function App() {
                 placeholder="Paste token…"
                 required
                 disabled={busy}
+                aria-invalid={!!incomingToken.error}
+                aria-describedby="receive-token-status"
                 value={tokenText}
-                onChange={(e) => setTokenText(e.target.value)}
+                onChange={(e) => {
+                  setTokenText(e.target.value);
+                  setError("");
+                }}
               />
+              {incomingToken.error ? (
+                <div
+                  id="receive-token-status"
+                  className="banner error"
+                  role="alert"
+                >
+                  {incomingToken.error}
+                </div>
+              ) : (
+                <p
+                  id="receive-token-status"
+                  className="small muted"
+                  role="status"
+                >
+                  {incomingToken.token
+                    ? `Token recognized · ${format(psTokenAmount(incomingToken.token))} sats`
+                    : "Paste a token to check its amount."}
+                </p>
+              )}
               <p className="small muted">
                 Use tokens from your connected mint: {mintUrl}
               </p>
-              <button className="button dark full" disabled={busy || !manager}>
+              <button
+                className="button dark full"
+                disabled={busy || !manager || !incomingToken.token}
+              >
                 {busy ? (
                   <LoaderCircle className="spinning" size={18} />
                 ) : (
