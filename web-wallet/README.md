@@ -59,6 +59,10 @@ over HTTPS and use an HTTPS mint; browsers block mixed-content requests.
   invoice with its hash, and displays the invoice/QR. Pay from a Lightning wallet.
   Once the payment is held (`ACCEPTED`), the wallet mints denomination proofs.
   The payer's wallet can continue to show a pending payment until settlement.
+  The wallet shows only the newest invoice still awaiting payment. **Deposit
+  invoice history** opens all invoices for the selected mint, newest first,
+  including funded and closed invoices. Select an entry to reopen it. Older
+  waiting invoices continue to be checked for payment in the background.
 - **Send:** picks one backing with enough value, privately splits its proofs,
   retains change, and saves the outgoing `cashuPS` token in Activity. Its preimage
   travels with the token. Sent proofs are excluded from the balance.

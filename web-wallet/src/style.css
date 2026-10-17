@@ -837,6 +837,37 @@ p {
   align-items: center;
   margin-left: auto;
 }
+.invoice-history {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.invoice-history li + li {
+  border-top: 1px solid var(--line);
+}
+.invoice-history-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 16px 0;
+  background: transparent;
+  text-align: left;
+  font-size: 13px;
+}
+.invoice-history-details {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.invoice-history-details strong {
+  font-weight: 500;
+}
+.invoice-history-row > .small {
+  flex: 0 1 90px;
+}
 .settings-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
