@@ -79,6 +79,7 @@ const amountStyle = (text: string): CSSProperties =>
 const short = (hash: string) => hash.slice(0, 8) + "…" + hash.slice(-6);
 type Dialog =
   | "fund"
+  | "funding-history"
   | "send"
   | "receive"
   | "pay"
@@ -487,6 +488,10 @@ export function App() {
     open("token");
     setTokenText(value);
   }
+  function showFunding(value: TmpCashFunding) {
+    open("fund");
+    setFunding(value);
+  }
   function switchMint(event: FormEvent) {
     event.preventDefault();
     try {
@@ -518,9 +523,10 @@ export function App() {
   const localOperations = (view?.operations ?? []).filter(
     (a) => a.mint === mintUrl,
   );
-  const localFundings = (view?.fundings ?? []).filter(
-    (f) => f.mint === mintUrl && f.state === "waiting",
-  );
+  const localFundings = (view?.fundings ?? [])
+    .filter((f) => f.mint === mintUrl)
+    .sort((a, b) => b.createdAt - a.createdAt);
+  const latestWaitingFunding = localFundings.find((f) => f.state === "waiting");
   const groups = Object.values(
     (view?.proofs ?? [])
       .filter((p) => p.mint === mintUrl && p.state === "ready")
@@ -795,22 +801,28 @@ export function App() {
             )}
             {!!localFundings.length && (
               <section className="fundings-panel">
-                {localFundings.map((f) => (
+                {latestWaitingFunding && (
                   <button
                     className="funding-row"
-                    key={f.id}
-                    onClick={() => {
-                      open("fund");
-                      setFunding(f);
-                    }}
+                    onClick={() => showFunding(latestWaitingFunding)}
                   >
                     <span className="status-dot waiting" />
-                    <span>{format(f.amount)} sats awaiting funding</span>
+                    <span>
+                      {format(latestWaitingFunding.amount)} sats awaiting
+                      funding
+                    </span>
                     <span className="small muted">
                       Open invoice <ChevronRight size={14} />
                     </span>
                   </button>
-                ))}
+                )}
+                <button
+                  className="text-button small"
+                  onClick={() => open("funding-history")}
+                >
+                  Deposit invoice history ({localFundings.length})
+                  <ChevronRight size={14} />
+                </button>
               </section>
             )}
             <div className="content-grid">
@@ -1194,6 +1206,7 @@ export function App() {
                 funding?.state === "minted"
                   ? "Sats in your pocket."
                   : "Add sats.",
+              "funding-history": "Deposit invoice history.",
               send: "Pass it on.",
               receive: "Receive ecash.",
               pay: quote ? "Ready to pay?" : "Pay with Lightning.",
@@ -1206,6 +1219,8 @@ export function App() {
           subtitle={
             {
               fund: "Fund a hold invoice. Your ecash appears when the payment is held.",
+              "funding-history":
+                "Invoices created on this device for this mint, newest first.",
               send: "Create a fresh token to share. Send from one backing at a time.",
               receive:
                 "Paste an ecash token. We’ll refresh its proofs before adding it.",
@@ -1223,6 +1238,36 @@ export function App() {
             <div className="banner error" role="alert">
               {error}
             </div>
+          )}
+          {dialog === "funding-history" && (
+            <ul className="invoice-history" aria-label="Deposit invoices">
+              {localFundings.map((f) => (
+                <li key={f.id}>
+                  <button
+                    className="invoice-history-row"
+                    onClick={() => showFunding(f)}
+                  >
+                    <span className="invoice-history-details">
+                      <strong>{format(f.amount)} sats</strong>
+                      <time
+                        className="small muted"
+                        dateTime={new Date(f.createdAt).toISOString()}
+                      >
+                        {new Date(f.createdAt).toLocaleString()}
+                      </time>
+                    </span>
+                    <span className="small muted">
+                      {f.state === "minted"
+                        ? "Funded"
+                        : f.state === "closed"
+                          ? "Closed"
+                          : "Awaiting payment"}
+                    </span>
+                    <ChevronRight size={16} />
+                  </button>
+                </li>
+              ))}
+            </ul>
           )}
           {dialog === "fund" &&
             (!funding ? (
@@ -1327,6 +1372,14 @@ export function App() {
                 </p>
               </>
             ))}
+          {dialog === "fund" && funding && (
+            <button
+              className="text-button small"
+              onClick={() => open("funding-history")}
+            >
+              Deposit invoice history <ChevronRight size={14} />
+            </button>
+          )}
           {dialog === "send" && (
             <form
               onSubmit={(e) => {
