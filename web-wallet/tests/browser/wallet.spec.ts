@@ -633,9 +633,9 @@ test("mobile navigation, invalid tokens, and offline balance visibility", async 
   ).toBe(true);
   await page.getByRole("button", { name: "Receive", exact: true }).click();
   await page.getByLabel("Ecash token").fill("cashuAinvalid");
-  await page
-    .getByRole("button", { name: "Receive token", exact: true })
-    .click();
+  await expect(
+    page.getByRole("button", { name: "Receive token", exact: true }),
+  ).toBeDisabled();
   await expect(page.getByRole("alert")).toContainText("cashuPS");
   await page.getByRole("button", { name: "Close dialog" }).click();
   await page.getByRole("button", { name: "Settings", exact: true }).click();

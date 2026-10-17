@@ -67,12 +67,105 @@ async function setDeadline(
   });
 }
 
-async function openReceive(page: Page, token: PSToken) {
+async function openReceive(page: Page, token?: PSToken) {
   await page.goto("/wallet/");
   await expect(page.getByText("Mint connected", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Receive", exact: true }).click();
-  await page.getByLabel("Ecash token").fill(encodePSToken(token));
+  if (token) await page.getByLabel("Ecash token").fill(encodePSToken(token));
 }
+
+test("recognizes a pasted token and enables receiving after invalid or empty input", async ({
+  page,
+}) => {
+  const token = await issueToken(page);
+  const replacement = await issueToken(page, 4);
+  await openReceive(page);
+  const input = page.getByLabel("Ecash token");
+  const receive = page.getByRole("button", {
+    name: "Receive token",
+    exact: true,
+  });
+  let swaps = 0;
+  page.on("request", (request) => {
+    if (request.url() === mintUrl + "/v1/swap") swaps++;
+  });
+  await expect(receive).toBeDisabled();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+
+  for (const invalid of ["cashuAinvalid", "cashuPSnot-a-token"]) {
+    await input.fill(invalid);
+    await expect(receive).toBeDisabled();
+    await expect(input).toHaveAttribute("aria-invalid", "true");
+    await expect(page.getByRole("alert")).toHaveText(
+      "Enter a valid cashuPS ecash token.",
+    );
+  }
+
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  const pasted = ` \n cashu:${encodePSToken(token)}\n `;
+  await page.evaluate((value) => navigator.clipboard.writeText(value), pasted);
+  await input.focus();
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.press("ControlOrMeta+V");
+  await expect(input).toHaveValue(pasted);
+  await expect(input).toHaveAttribute("aria-invalid", "false");
+  await expect(
+    page.getByText("Token recognized · 8 sats", { exact: true }),
+  ).toBeVisible();
+  await expect(receive).toBeEnabled();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+
+  await input.fill(encodePSToken(replacement));
+  await expect(
+    page.getByText("Token recognized · 4 sats", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Token recognized · 8 sats", { exact: true }),
+  ).toHaveCount(0);
+  await input.fill("  \n ");
+  await expect(receive).toBeDisabled();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(
+    page.getByText("Token recognized · 4 sats", { exact: true }),
+  ).toHaveCount(0);
+
+  await input.fill(encodePSToken(token));
+  await expect(receive).toBeEnabled();
+  expect(swaps).toBe(0);
+  await expect(page.getByTestId("balance")).toHaveText("0sats");
+  await receive.click();
+  await expect(
+    page.getByText("Received 8 sats.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByTestId("balance")).toHaveText("8sats");
+  expect(swaps).toBe(1);
+});
+
+test("recognizes the token's mint and enables receiving after replacing a different-mint token", async ({
+  page,
+}) => {
+  const token = await issueToken(page);
+  await openReceive(page, { ...token, mint: "https://other-mint.example" });
+  const receive = page.getByRole("button", {
+    name: "Receive token",
+    exact: true,
+  });
+  await expect(receive).toBeDisabled();
+  await expect(page.getByRole("alert")).toContainText(
+    "This token is from https://other-mint.example. Connect to that mint in Settings to receive it.",
+  );
+  await expect(
+    page.getByText("Token recognized · 8 sats", { exact: true }),
+  ).toHaveCount(0);
+  await page.getByLabel("Ecash token").fill(encodePSToken(token));
+  await expect(receive).toBeEnabled();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(
+    page.getByText("Token recognized · 8 sats", { exact: true }),
+  ).toBeVisible();
+  await receive.click();
+  await expect(page.getByTestId("balance")).toHaveText("8sats");
+});
 
 test("checks a fresh deadline and leaves the token untouched until confirmed", async ({
   page,
@@ -188,7 +281,7 @@ test("warns when a later backing in a mixed token has a near deadline", async ({
   expect(messages).toEqual([warning]);
 });
 
-test("rejects an expired backing without offering to receive it", async ({
+test("rejects an expired backing and recognizes a replacement token", async ({
   page,
 }) => {
   const token = await issueToken(page);
@@ -205,4 +298,14 @@ test("rejects an expired backing without offering to receive it", async ({
   await expect(page.getByRole("alert")).toContainText("deadline has passed");
   await expect(page.getByTestId("balance")).toHaveText("0sats");
   expect(messages).toEqual([]);
+  const replacement = await issueToken(page, 4);
+  await page.getByLabel("Ecash token").fill(encodePSToken(replacement));
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(
+    page.getByText("Token recognized · 4 sats", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Receive token", exact: true })
+    .click();
+  await expect(page.getByTestId("balance")).toHaveText("4sats");
 });

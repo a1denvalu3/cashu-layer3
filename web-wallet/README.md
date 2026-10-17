@@ -66,9 +66,12 @@ over HTTPS and use an HTTPS mint; browsers block mixed-content requests.
 - **Send:** picks one backing with enough value, privately splits its proofs,
   retains change, and saves the outgoing `cashuPS` token in Activity. Its preimage
   travels with the token. Sent proofs are excluded from the balance.
-- **Receive:** checks the signature, mint, backing, deadline, and nullifiers,
-  then swaps into fresh owner secrets. If any backing has less than 20 minutes
-  until its redemption deadline, the wallet asks for confirmation before saving
+- **Receive:** recognizes pasted tokens immediately, previews their amount, and
+  enables **Receive token** for a correctly encoded token from the selected mint.
+  Empty or malformed input keeps receiving disabled. Tokens from another mint
+  show which mint to select. Receiving checks the signature, mint, backing,
+  deadline, and nullifiers, then swaps into fresh owner secrets. If any backing
+  has less than 20 minutes until its redemption deadline, the wallet asks for confirmation before saving
   or swapping the token. Block-based deadlines use an estimate of 10 minutes per
   remaining block, with a reminder that actual block times vary. Canceling leaves
   the token untouched. Mixed bundles are refreshed with a
