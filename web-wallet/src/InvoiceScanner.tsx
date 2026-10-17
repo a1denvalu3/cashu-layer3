@@ -1,19 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { Camera, Upload } from "lucide-react";
 import QrScanner from "qr-scanner";
-import { psInvoiceDetails } from "@cashu/cashu-ts/tmp-cash";
+import { psLightningTarget } from "@cashu/cashu-ts/tmp-cash";
 
 function invoiceFromQR(value: string): string {
-  const invoice = value
-    .trim()
-    .replace(/^lightning:/i, "")
-    .toLowerCase();
+  const invoice = value.trim().replace(/^lightning:/i, "");
   try {
-    psInvoiceDetails(invoice);
-    return invoice;
+    const target = psLightningTarget(invoice);
+    return target.kind === "invoice" ? target.invoice : invoice;
   } catch {
     throw new Error(
-      "This QR code does not contain a valid BOLT11 Lightning invoice.",
+      "This QR code does not contain a valid Lightning invoice, Lightning address, or LNURL.",
     );
   }
 }
@@ -75,7 +72,7 @@ export function InvoiceScanner({
       if (!active) return;
       setScanning(false);
       setError(
-        "Could not access the camera. Allow camera access on HTTPS or localhost, upload a QR image, or paste the invoice.",
+        "Could not access the camera. Allow camera access on HTTPS or localhost, upload a QR image, or paste the invoice or address.",
       );
     });
     return () => {
@@ -98,7 +95,7 @@ export function InvoiceScanner({
         }));
       } catch {
         throw new Error(
-          "Could not read a QR code. Choose a clear image of a Lightning invoice.",
+          "Could not read a QR code. Choose a clear image of a Lightning invoice, address, or LNURL.",
         );
       }
       if (request !== imageRequest.current) return;
@@ -159,7 +156,7 @@ export function InvoiceScanner({
             />
           </div>
           <p className="small muted" role="status">
-            Point your camera at a Lightning invoice QR code.
+            Point your camera at a Lightning invoice, address, or LNURL QR code.
           </p>
         </>
       )}

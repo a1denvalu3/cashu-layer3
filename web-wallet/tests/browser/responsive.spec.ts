@@ -247,7 +247,7 @@ test("keeps funding, token, payment and backup dialogs usable in short and narro
         data: { amount: 7 },
       });
       await page
-        .getByLabel("Lightning invoice")
+        .getByLabel("Lightning invoice or address")
         .fill((await response.json()).request);
       await page.getByRole("button", { name: "Review payment" }).click();
       await expect(

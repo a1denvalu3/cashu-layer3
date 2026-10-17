@@ -14,7 +14,8 @@ are omitted. Each package retains its upstream license.
 
 cashu-ts 3.3.0 is the version this Coco revision targets. The upstream standard
 Cashu exports remain available. New `tmp-cash` subpath and root exports add
-`PSWallet`, PS wire schemas, token codecs, BOLT11 validation, and a byte-compatible
+`PSWallet`, PS wire schemas, token codecs, BOLT11 validation, LNURL-pay and Lightning
+address resolution, and a byte-compatible
 TypeScript port of this repository's v3 PS credential/proof implementation.
 Cryptographic arithmetic, pairing, and hash-to-curve use pinned Noble libraries;
 the interoperability tests exercise the Python verifier directly.

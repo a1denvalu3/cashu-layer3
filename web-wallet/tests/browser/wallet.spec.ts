@@ -293,11 +293,13 @@ test("discards a quote when the invoice changes during its request", async ({
   await page
     .getByRole("button", { name: "Pay with Lightning", exact: true })
     .click();
-  await page.getByLabel("Lightning invoice").fill(invoiceA);
+  await page.getByLabel("Lightning invoice or address").fill(invoiceA);
   await page.getByRole("button", { name: "Review payment" }).click();
-  await page.getByLabel("Lightning invoice").fill(invoiceB);
+  await page.getByLabel("Lightning invoice or address").fill(invoiceB);
   releaseQuote();
-  await expect(page.getByLabel("Lightning invoice")).toHaveValue(invoiceB);
+  await expect(page.getByLabel("Lightning invoice or address")).toHaveValue(
+    invoiceB,
+  );
   await expect(
     page.getByRole("button", { name: "Pay 10 sats", exact: true }),
   ).toHaveCount(0);
@@ -348,7 +350,7 @@ test("completes a pending payment without a manual retry or a second payment", a
   await page
     .getByRole("button", { name: "Pay with Lightning", exact: true })
     .click();
-  await page.getByLabel("Lightning invoice").fill(invoice);
+  await page.getByLabel("Lightning invoice or address").fill(invoice);
   await expect(page.getByRole("spinbutton")).toHaveCount(0);
   await page.getByRole("button", { name: "Review payment" }).click();
   await expect(page.getByText("up to 2 sats", { exact: true })).toBeVisible();
@@ -388,7 +390,7 @@ test("shows a slow payment as pending while preserving its request", async ({
   await page
     .getByRole("button", { name: "Pay with Lightning", exact: true })
     .click();
-  await page.getByLabel("Lightning invoice").fill(invoice);
+  await page.getByLabel("Lightning invoice or address").fill(invoice);
   await page.getByRole("button", { name: "Review payment" }).click();
   await page.getByRole("button", { name: "Pay 10 sats", exact: true }).click();
   await expect(
@@ -562,7 +564,7 @@ test("fund, reload, send, receive in a second wallet, melt and expire residual c
   await bob
     .getByRole("button", { name: "Pay with Lightning", exact: true })
     .click();
-  await bob.getByLabel("Lightning invoice").fill(invoice);
+  await bob.getByLabel("Lightning invoice or address").fill(invoice);
   await expect(bob.getByRole("spinbutton")).toHaveCount(0);
   await bob.getByRole("button", { name: "Review payment" }).click();
   await expect(
