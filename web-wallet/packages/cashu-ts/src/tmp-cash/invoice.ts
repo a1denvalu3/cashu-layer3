@@ -25,6 +25,7 @@ export function psInvoiceDetails(request: string): {
   paymentHash: string;
   amount: number;
   expiry: number;
+  descriptionHash?: string;
 } {
   if (!request || request.length > 4096 || !/^ln(bc|tb|bcrt)/i.test(request))
     throw new Error("Enter a BOLT11 Lightning invoice");
@@ -46,10 +47,17 @@ export function psInvoiceDetails(request: string): {
     .toBytes(true);
   if (!secp256k1.verify(compact, digest, pub, { prehash: false, lowS: false }))
     throw new Error("Invalid invoice signature");
+  let descriptionHash: string | undefined;
   for (let i = 7; i < body.length; ) {
     const tag = body[i],
       length = body[i + 1] * 32 + body[i + 2];
     if (i + 3 + length > body.length) throw new Error("Invalid invoice tags");
+    if (tag === 23) {
+      if (length !== 52) throw new Error("Invalid invoice description hash");
+      descriptionHash = bytesToHex(
+        wordsToBytes(body.slice(i + 3, i + 3 + length)).slice(0, 32),
+      );
+    }
     if (
       tag === 19 &&
       bytesToHex(
@@ -61,6 +69,8 @@ export function psInvoiceDetails(request: string): {
   }
   const hash = decoded.sections.find((s) => s.name === "payment_hash");
   const value = decoded.sections.find((s) => s.name === "amount");
+  const timestamp = decoded.sections.find((s) => s.name === "timestamp");
+  const expiry = decoded.sections.find((s) => s.name === "expiry");
   if (
     !hash ||
     hash.name !== "payment_hash" ||
@@ -74,6 +84,9 @@ export function psInvoiceDetails(request: string): {
   return {
     paymentHash: hex32.parse(hash.value),
     amount: amount.parse(Number(msat / 1000n)),
-    expiry: decoded.expiry,
+    expiry:
+      (timestamp?.name === "timestamp" ? timestamp.value : 0) +
+      (expiry?.name === "expiry" ? expiry.value : 3600),
+    ...(descriptionHash ? { descriptionHash } : {}),
   };
 }

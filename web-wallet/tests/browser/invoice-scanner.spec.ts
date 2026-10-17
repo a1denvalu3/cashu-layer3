@@ -124,11 +124,11 @@ test("reads invoice QR images and pays only after review and confirmation", asyn
   await openPayment(page);
   await uploadQR(page, invoice);
   await expect(
-    page.getByLabel("Lightning invoice", { exact: true }),
+    page.getByLabel("Lightning invoice or address", { exact: true }),
   ).toHaveValue(invoice);
   await uploadQR(page, `LIGHTNING:${replacement.toUpperCase()}`);
   await expect(
-    page.getByLabel("Lightning invoice", { exact: true }),
+    page.getByLabel("Lightning invoice or address", { exact: true }),
   ).toHaveValue(replacement);
   expect(requests).toEqual([]);
   await expect(page.getByTestId("balance")).toHaveText("100sats");
@@ -145,13 +145,15 @@ test("rejects unrelated QR codes and unreadable images while preserving manual e
 }) => {
   const invoice = await receiverInvoice(page);
   await openPayment(page);
-  await page.getByLabel("Lightning invoice", { exact: true }).fill(invoice);
-  await uploadQR(page, "https://example.org/");
+  await page
+    .getByLabel("Lightning invoice or address", { exact: true })
+    .fill(invoice);
+  await uploadQR(page, "bitcoin:bc1qexample");
   await expect(page.getByRole("alert")).toHaveText(
-    "This QR code does not contain a valid BOLT11 Lightning invoice.",
+    "This QR code does not contain a valid Lightning invoice, Lightning address, or LNURL.",
   );
   await expect(
-    page.getByLabel("Lightning invoice", { exact: true }),
+    page.getByLabel("Lightning invoice or address", { exact: true }),
   ).toHaveValue(invoice);
   await page.getByLabel("Invoice QR image").setInputFiles({
     name: "broken.png",
@@ -159,12 +161,12 @@ test("rejects unrelated QR codes and unreadable images while preserving manual e
     buffer: Buffer.from("not an image"),
   });
   await expect(page.getByRole("alert")).toHaveText(
-    "Could not read a QR code. Choose a clear image of a Lightning invoice.",
+    "Could not read a QR code. Choose a clear image of a Lightning invoice, address, or LNURL.",
   );
   await uploadQR(page, invoice.toUpperCase());
   await expect(page.getByRole("alert")).toHaveCount(0);
   await expect(
-    page.getByLabel("Lightning invoice", { exact: true }),
+    page.getByLabel("Lightning invoice or address", { exact: true }),
   ).toHaveValue(invoice);
   await page.getByRole("button", { name: "Review payment" }).click();
   await expect(
@@ -181,7 +183,7 @@ test("scans real camera frames and releases the camera after a valid invoice", a
   expect((await cameraState(page)).requests).toBe(0);
   await page.getByRole("button", { name: "Scan QR code", exact: true }).click();
   await expect(
-    page.getByLabel("Lightning invoice", { exact: true }),
+    page.getByLabel("Lightning invoice or address", { exact: true }),
   ).toHaveValue(invoice);
   await expect(page.getByLabel("Invoice QR camera")).toHaveCount(0);
   await expect
@@ -273,7 +275,7 @@ test("keeps upload and paste available when camera permission is denied", async 
   await expect(page.getByLabel("Invoice QR camera")).toHaveCount(0);
   await uploadQR(page, invoice);
   await expect(
-    page.getByLabel("Lightning invoice", { exact: true }),
+    page.getByLabel("Lightning invoice or address", { exact: true }),
   ).toHaveValue(invoice);
   await expect(page.getByRole("alert")).toHaveCount(0);
 });

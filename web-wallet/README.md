@@ -77,10 +77,20 @@ over HTTPS and use an HTTPS mint; browsers block mixed-content requests.
   is lost or the tab closes. Tokens from another mint require explicitly
   connecting to that mint first. A backing without a preimage offers an
   **Add backing preimage** action.
-- **Pay with Lightning:** paste an invoice, scan its QR code with your camera,
+- **Pay with Lightning:** paste an invoice, Lightning address (`name@example.com`),
+  or LNURL-pay link, scan its QR code with your camera,
   or upload a QR image. Camera scanning requires HTTPS or localhost and camera
   permission. Plain invoices and `lightning:` QR payloads are supported, including
-  uppercase invoices. Scanning fills the invoice field; choose **Review payment**
+  uppercase invoices and LNURLs. Addresses automatically look up their
+  [LNURL-pay endpoint](https://github.com/lnurl/luds/blob/luds/16.md); encoded
+  `LNURL1…`, HTTPS payment links, and `lnurlp://` links are also supported.
+  Choose an amount within the service's limits (fixed amounts are filled in),
+  then **Review payment** fetches and validates the invoice before requesting
+  the mint's fee quote. The invoice must match the chosen amount and any
+  description-hash commitment to the service's metadata, and must not be expired.
+  LNURL services must allow browser requests through CORS; lookup and invoice
+  errors can be retried without spending ecash. Services requiring payer identity
+  are not supported. Scanning fills the payment field; choose **Review payment**
   to check the amount and fees before confirming. The wallet verifies the signed
   BOLT11 invoice, requests the mint's fee quote, and shows its amount and the
   mint's fee reserve. The wallet reserves

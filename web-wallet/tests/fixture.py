@@ -1,6 +1,7 @@
 """Disposable, loopback-only Python mint for browser/protocol interoperability tests."""
 
 import argparse
+import hashlib
 import os
 import sys
 import tempfile
@@ -8,6 +9,7 @@ from pathlib import Path
 from typing import Literal
 
 import uvicorn
+from bolt11 import Tag, TagChar, Tags, decode, encode
 from pydantic import BaseModel, Field
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -23,6 +25,7 @@ class Funding(BaseModel):
 
 class Receiver(BaseModel):
     amount: int
+    metadata: str | None = None
 
 
 class Quote(BaseModel):
@@ -74,7 +77,26 @@ def main():
 
         @app.post("/test/receiver")
         async def receiver(request: Receiver):
-            return {"request": backend.receiver_invoice(request.amount, os.urandom(32))}
+            invoice = backend.receiver_invoice(request.amount, os.urandom(32))
+            if request.metadata is not None:
+                decoded = decode(invoice)
+                decoded.tags = Tags(
+                    [tag for tag in decoded.tags if tag.char != TagChar.description]
+                    + [
+                        Tag(
+                            TagChar.description_hash,
+                            hashlib.sha256(request.metadata.encode()).hexdigest(),
+                        )
+                    ]
+                )
+                hashed = encode(decoded, private_key="11" * 32)
+                with backend.db.transaction() as conn:
+                    conn.execute(
+                        "UPDATE receivers SET request=? WHERE request=?",
+                        (hashed, invoice),
+                    )
+                invoice = hashed
+            return {"request": invoice}
 
         @app.post("/test/expire-melt-quote")
         async def expire_melt_quote(request: Quote):

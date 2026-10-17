@@ -44,6 +44,10 @@ import {
   psTokenAmount,
   checkPSBacking,
   isPSPendingMeltError,
+  psLightningTarget,
+  psLnurlPayRequest,
+  psLnurlInvoice,
+  type PSLnurlPayRequest,
   type PSMeltQuote,
 } from "@cashu/cashu-ts/tmp-cash";
 import { decryptBackup, encryptBackup, MAX_BACKUP_LENGTH } from "./backup";
@@ -144,6 +148,9 @@ function Modal({
     d.showModal();
     return () => d.close();
   }, []);
+  useEffect(() => {
+    ref.current?.scrollTo(0, 0);
+  }, [title]);
   return (
     <dialog
       ref={ref}
@@ -327,6 +334,10 @@ export function App() {
     [tokenText, setTokenText] = useState(""),
     [invoice, setInvoice] = useState("");
   const [quote, setQuote] = useState<PSMeltQuote | null>(null);
+  const [lnurl, setLnurl] = useState<PSLnurlPayRequest | null>(null),
+    [lnurlLoading, setLnurlLoading] = useState(false),
+    [lnurlError, setLnurlError] = useState(""),
+    [lnurlRetry, setLnurlRetry] = useState(0);
   const [funding, setFunding] = useState<TmpCashFunding | null>(null),
     [password, setPassword] = useState(""),
     [backupFile, setBackupFile] = useState<File | null>(null);
@@ -338,9 +349,51 @@ export function App() {
   const updateInvoice = useCallback((value: string) => {
     meltQuoteVersion.current += 1;
     setInvoice(value);
+    setAmount("");
+    setLnurl(null);
     setQuote(null);
     setError("");
   }, []);
+  const paymentTarget = useMemo(() => {
+    try {
+      return psLightningTarget(invoice);
+    } catch {
+      return null;
+    }
+  }, [invoice]);
+  useEffect(() => {
+    setLnurl(null);
+    setLnurlError("");
+    setLnurlLoading(false);
+    if (dialog !== "pay" || paymentTarget?.kind !== "lnurl") return;
+    const controller = new AbortController();
+    setLnurlLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const request = await psLnurlPayRequest(
+          paymentTarget.url,
+          controller.signal,
+        );
+        if (!controller.signal.aborted) {
+          setLnurl(request);
+          setAmount(
+            request.minSats === request.maxSats ? String(request.minSats) : "",
+          );
+        }
+      } catch (err) {
+        if (!controller.signal.aborted)
+          setLnurlError(
+            err instanceof Error ? err.message : "LNURL lookup failed",
+          );
+      } finally {
+        if (!controller.signal.aborted) setLnurlLoading(false);
+      }
+    }, 400);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [dialog, paymentTarget, lnurlRetry]);
   useEffect(() => {
     fundingRef.current = funding;
   }, [funding]);
@@ -471,6 +524,7 @@ export function App() {
     setTokenText("");
     setInvoice("");
     setQuote(null);
+    setLnurl(null);
     setSelectedHash("");
     setFunding(null);
     setPassword("");
@@ -1224,7 +1278,7 @@ export function App() {
               send: "Create a fresh token to share. Send from one backing at a time.",
               receive:
                 "Paste an ecash token. We’ll refresh its proofs before adding it.",
-              pay: "Redeem tokens from one or several backings.",
+              pay: "Pay an invoice, Lightning address, or LNURL with your ecash.",
               backup: "Protect this file with a password you can remember.",
               restore: "Restore an encrypted backup into this empty wallet.",
               token:
@@ -1513,34 +1567,103 @@ export function App() {
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
-                  const version = ++meltQuoteVersion.current;
                   run(async () => {
-                    const nextQuote = await manager!.meltQuote(
-                      invoice.trim().replace(/^lightning:/i, ""),
-                    );
-                    if (meltQuoteVersion.current === version)
-                      setQuote(nextQuote);
+                    const version = ++meltQuoteVersion.current;
+                    try {
+                      const target = psLightningTarget(invoice);
+                      let request: string;
+                      if (target.kind === "invoice") request = target.invoice;
+                      else {
+                        if (!lnurl || lnurl.url !== target.url)
+                          throw new Error(
+                            "Wait for the Lightning address lookup to finish",
+                          );
+                        request = await psLnurlInvoice(lnurl, Number(amount));
+                      }
+                      if (meltQuoteVersion.current !== version) return;
+                      const nextQuote = await manager!.meltQuote(request);
+                      if (meltQuoteVersion.current === version)
+                        setQuote(nextQuote);
+                    } catch (err) {
+                      if (meltQuoteVersion.current === version) throw err;
+                    }
                   });
                 }}
               >
-                <label htmlFor="pay-invoice">Lightning invoice</label>
+                <label htmlFor="pay-invoice">
+                  Lightning invoice or address
+                </label>
                 <textarea
                   autoFocus
                   id="pay-invoice"
                   className="token-input"
                   rows={4}
                   required
-                  placeholder="lnbc…"
+                  placeholder="lnbc…, name@example.com, or LNURL…"
                   value={invoice}
                   onChange={(e) => updateInvoice(e.target.value)}
                   spellCheck={false}
                 />
                 <InvoiceScanner onScan={updateInvoice} disabled={busy} />
+                {lnurlLoading && (
+                  <p className="small muted" role="status">
+                    Looking up{" "}
+                    {paymentTarget?.kind === "lnurl"
+                      ? paymentTarget.label
+                      : "LNURL"}
+                    …
+                  </p>
+                )}
+                {lnurlError && (
+                  <div className="banner error" role="alert">
+                    {lnurlError}
+                    <button
+                      type="button"
+                      className="text-button small"
+                      onClick={() => setLnurlRetry((value) => value + 1)}
+                    >
+                      Retry lookup
+                    </button>
+                  </div>
+                )}
+                {lnurl && (
+                  <>
+                    <p className="small muted">
+                      {lnurl.domain} · {lnurl.description}
+                    </p>
+                    <label htmlFor="pay-amount">Amount in sats</label>
+                    <div className="amount-input">
+                      <input
+                        id="pay-amount"
+                        type="number"
+                        min={lnurl.minSats}
+                        max={lnurl.maxSats}
+                        step="1"
+                        required
+                        value={amount}
+                        onChange={(event) => {
+                          meltQuoteVersion.current += 1;
+                          setAmount(event.target.value);
+                          setError("");
+                        }}
+                      />
+                      <span>sats</span>
+                    </div>
+                    <p className="small muted">
+                      {lnurl.minSats === lnurl.maxSats
+                        ? `This payment requests ${format(lnurl.minSats)} sats.`
+                        : `Send between ${format(lnurl.minSats)} and ${format(lnurl.maxSats)} sats.`}
+                    </p>
+                  </>
+                )}
                 <p className="small muted">
                   The mint quotes the fee reserve. Any unused reserve comes back
                   as ecash while its backing remains active.
                 </p>
-                <button className="button dark full" disabled={busy}>
+                <button
+                  className="button dark full"
+                  disabled={busy || (paymentTarget?.kind === "lnurl" && !lnurl)}
+                >
                   {busy ? (
                     <LoaderCircle className="spinning" size={18} />
                   ) : (
@@ -1551,6 +1674,13 @@ export function App() {
               </form>
             ) : (
               <>
+                {lnurl && paymentTarget?.kind === "lnurl" && (
+                  <p className="small muted">
+                    Paying <strong>{paymentTarget.label}</strong>
+                    <br />
+                    {lnurl.description}
+                  </p>
+                )}
                 <div className="payment-summary">
                   <div>
                     <span>Invoice amount</span>
